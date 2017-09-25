@@ -510,7 +510,7 @@ fail:
 
 static size_t entropy(void *buf, size_t n)
 {
-    #if defined(__linux__) && defined(SYS_getrandom) && 0
+    #if defined(__linux__) && defined(SYS_getrandom)
     if (syscall(SYS_getrandom, buf, n, 0) == n)
         return n;
     #elif defined(SYS_getentropy)
