@@ -447,12 +447,13 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
     }
 }
 
-#if defined(__unix__)
-#include <stropts.h>
-#include <sys/syscall.h>
+#if defined(__unix__) || defined(__APPLE__)
 #define _GNU_SOURCE
 #include <unistd.h>
+#include <sys/syscall.h>
+
 #ifdef __linux__
+#include <stropts.h>
 #include <linux/random.h>
 #endif
 
