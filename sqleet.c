@@ -253,9 +253,12 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *zKey, int nKey)
             if (count > 0) {
                 /* Read page1 (to read the salt and trigger codec_kdf) */
                 sqlite3PcacheTruncate(pager->pPCache, 0);
-                if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK)
+                if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK) {
                     sqlite3PagerUnref(page);
-                else rc = codec_set_to(NULL, pBt);
+                } else {
+                    codec_set_to(NULL, pBt);
+                    rc = SQLITE_NOTADB;
+                }
             } else {
                 /* Generate a new salt for an empty database */
                 chacha20_rng(codec->salt, 16);
@@ -264,15 +267,15 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *zKey, int nKey)
             pager_unlock(pager);
         }
     } else if (nDb != 0 && nKey > 0) {
-        /* Use the main DB's encryption */
+        /* Use the main database's encryption */
         Codec *mcodec = sqlite3PagerGetCodec(sqlite3BtreePager(db->aDb[0].pBt));
         if (mcodec) {
             Btree *pBt = db->aDb[nDb].pBt;
             if (pBt && (codec = codec_dup(mcodec)))
                 rc = codec_set_to(codec, pBt);
         } else {
-            /* No encryption */
-            rc = SQLITE_OK;
+            /* Main DB's codec unavailable */
+            rc = SQLITE_CANTOPEN;
         }
     }
     sqlite3_mutex_leave(db->mutex);
