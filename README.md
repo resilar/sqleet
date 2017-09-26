@@ -16,7 +16,7 @@ On Windows, `-lpthread -ldl` are not required.
 If you want to use sqleet as a library, it is recommended that you download a
 preconfigured [release
 package](https://github.com/resilar/sqleet/releases/latest) instead of cloning
-the master.  The contained `sqleet.c` and `sqleet.h` files are intended to be
+the master. The contained `sqleet.c` and `sqleet.h` files are intended to be
 drop-in replacements for the official `sqlite3.c` amalgamation and `sqlite3.h`
 header. See [SQLite3 Encryption API](#sqlite3-encryption-api) for usage
 instructions.
@@ -31,7 +31,7 @@ Cryptography buzzwords
 - Poly1305 authentication tags.
 
 A low-level description of the encryption scheme can be found in
-[sqleet.c:65](sqleet.c#L65).
+[sqleet.c:80](sqleet.c#L80).
 
 
 Example
@@ -94,10 +94,10 @@ SQLITE_API int sqlite3_key(      /* Invoked by PRAGMA key='x' */
 );
 ```
 
-`sqlite3_key()` is typically called after `sqlite3_open()` to specify the key
-for an encrypted database. Note that the function does not touch the data on
-disk at all. Subsequent attempts to query the database will fail if the key was
-incorrect.
+`sqlite3_key()` is typically called immediately after `sqlite3_open()` to
+specify an encryption key for the opened database. Note that the function does
+not touch the data on disk. Subsequent attempts to read or write the database
+will fail if the key was incorrect.
 
 ```c
 SQLITE_API int sqlite3_rekey(    /* Invoked by PRAGMA rekey='x' */

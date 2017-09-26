@@ -37,6 +37,9 @@
     (p)[1] = ((v) >> 48) & 0xFF;    \
     (p)[0] = ((v) >> 56) & 0xFF;
 
+/*
+ * ChaCha20 stream cipher
+ */
 static void chacha20_block(unsigned char out[64], const uint32_t in[16])
 {
     int i;
@@ -115,6 +118,9 @@ void chacha20_xor(unsigned char *data, size_t n, const unsigned char key[32],
     return;
 }
 
+/*
+ * Poly1305 authentication tags
+ */
 void poly1305(const unsigned char *msg, size_t n, const unsigned char key[32],
               unsigned char tag[16])
 {
@@ -229,6 +235,9 @@ int poly1305_tagcmp(const unsigned char tag1[16], const unsigned char tag2[16])
     return d;
 }
 
+/*
+ * SHA256 hash function
+ */
 struct sha256 {
     uint32_t state[8];
     unsigned char buffer[64];
@@ -372,7 +381,7 @@ void sha256_final(struct sha256 *ctx, unsigned char hash[32])
 }
 
 /*
- * Optimized PBKDF2-HMAC-SHA256 implementation that reuses intermediate SHA256
+ * PBKDF2-HMAC-SHA256 key derivation optimized to reuse intermediate SHA256
  * states computed in the HMAC-SHA256 calculation of the inner and outer pad.
  */
 void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
@@ -447,6 +456,9 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
     }
 }
 
+/*
+ * Platform-specific entropy functions for seeding RNG
+ */
 #if defined(__unix__) || defined(__APPLE__)
 #define _GNU_SOURCE
 #include <unistd.h>
@@ -457,12 +469,12 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
 #include <linux/random.h>
 #endif
 
-/* Returns the number of urandom bytes read (either 0 or n). */
+/* Returns the number of urandom bytes read (either 0 or n) */
 static size_t read_urandom(void *buf, size_t n)
 {
     size_t i;
     ssize_t ret;
-    int fd, cnt;
+    int fd, count;
     struct stat st;
     int errnold = errno;
 
@@ -476,7 +488,7 @@ static size_t read_urandom(void *buf, size_t n)
     /* Check the sanity of the device node */
     if (fstat(fd, &st) == -1 || !S_ISCHR(st.st_mode)
             #ifdef __linux__
-            || ioctl(fd, RNDGETENTCNT, &cnt) == -1
+            || ioctl(fd, RNDGETENTCNT, &count) == -1
             #endif
             ) {
         close(fd);
@@ -502,6 +514,8 @@ static size_t read_urandom(void *buf, size_t n)
         }
     }
 
+    /* Tiny n may unintentionally fall through! */
+
 fail:
     fprintf(stderr, "bad /dev/urandom RNG)\n");
     abort(); /* PANIC! */
@@ -519,19 +533,26 @@ static size_t entropy(void *buf, size_t n)
     #endif
     return read_urandom(buf, n);
 }
+
 #elif defined(_WIN32)
+
 #include <windows.h>
 #define RtlGenRandom SystemFunction036
 BOOLEAN NTAPI RtlGenRandom(PVOID RandomBuffer, ULONG RandomBufferLength);
 #pragma comment(lib, "advapi32.lib")
+
 static size_t entropy(void *buf, size_t n)
 {
     return RtlGenRandom(buf, n) ? n : 0;
 }
+
 #else
-#error "Secure pseudorandom number generator unimplemented for this OS"
+# error "Secure pseudorandom number generator unimplemented for this OS"
 #endif
 
+/*
+ * ChaCha20 random number generator
+ */
 void chacha20_rng(void *out, size_t n)
 {
     static size_t available = 0;

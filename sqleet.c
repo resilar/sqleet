@@ -12,7 +12,7 @@
 typedef struct codec { 
     struct codec *reader, *writer;
     unsigned char key[32], salt[16];
-    unsigned char *pagebuf;
+    void *pagebuf;
     int pagesize;
     const void *zKey;
     int nKey;
@@ -22,20 +22,35 @@ Codec *codec_new(const char *zKey, int nKey)
 {
     Codec *codec;
     if ((codec = sqlite3_malloc(sizeof(Codec)))) {
-        codec->pagebuf = NULL;
-        codec->zKey = zKey;
-        codec->nKey = nKey;
+        codec->reader = codec->writer = codec;
         memset(codec->key, 0, sizeof(codec->key));
         memset(codec->salt, 0, sizeof(codec->salt));
-        codec->reader = codec->writer = codec;
+        codec->pagebuf = NULL;
+        codec->pagesize = 0;
+        codec->zKey = zKey;
+        codec->nKey = nKey;
     }
     return codec;
 }
 
-void codec_free(void *codec)
+void codec_free(void *pcodec)
 {
-    if (codec) {
-        sqlite3_free(((Codec *)codec)->pagebuf);
+    if (pcodec) {
+        int i;
+        volatile char *p;
+        Codec *codec = pcodec;
+        if (codec->zKey) {
+            p = (void *)codec->zKey;
+            for (i = 0; i < codec->nKey; p[i++] = '\0');
+            /* zKey memory is allocated by the user */
+        }
+        if (codec->pagebuf) {
+            p = codec->pagebuf;
+            for (i = 0; i < codec->pagesize; p[i++] = '\0');
+            sqlite3_free(codec->pagebuf);
+        }
+        p = pcodec;
+        for (i = 0; i < sizeof(Codec); p[i++] = '\0');
         sqlite3_free(codec);
     }
 }
@@ -68,7 +83,7 @@ void codec_kdf(Codec *codec)
  * | Encrypted data                         | 16-byte nonce  | 16-byte tag    |
  * +----------------------------------------+----------------+----------------+
  *
- * The first page (page_no=1) is the only exception that starts with a plaintext
+ * As the only exception, the first page (page_no=1) starts with a plaintext
  * salt contained in the first 16 bytes of the database file. The "master" key
  * is derived from a user-given password with the salt and 12345 iterations of
  * PBKDF-HMAC-SHA256. Future plans include switching to BLAKE2 and Argon2.
@@ -120,15 +135,9 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
     case 3: /* Load a page */
         if (reader) {
             int n = reader->pagesize - PAGE_RESERVED_LEN;
-            if (page == 1) {
-                int i = 0;
-                while (!reader->key[i++]) {
-                    if (i >= 32) {
-                        memcpy(reader->salt, data, 16);
-                        codec_kdf(reader);
-                        break;
-                    }
-                }
+            if (page == 1 && reader->zKey) {
+                memcpy(reader->salt, data, 16);
+                codec_kdf(reader);
             }
 
             /* Generate one-time keys */
@@ -138,13 +147,13 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
 
             /* Verify the MAC */
             poly1305(data, n + PAGE_NONCE_LEN, otk, tag);
-            if (poly1305_tagcmp(data + n + PAGE_NONCE_LEN, tag) != 0) {
-                return NULL;
+            if (!poly1305_tagcmp(data + n + PAGE_NONCE_LEN, tag)) {
+                /* Decrypt */
+                chacha20_xor(data, n, otk+32, data + n, counter+1);
+                if (page == 1) memcpy(data, "SQLite format 3", 16);
+            } else {
+                data = NULL;
             }
-
-            /* Decrypt */
-            chacha20_xor(data, n, otk+32, data + n, counter+1);
-            if (page == 1) memcpy(data, "SQLite format 3", 16);
         }
         break;
 
@@ -182,11 +191,19 @@ static int codec_set_to(Codec *codec, Btree *pBt)
     /* Allocate page buffer */
     pagesize = sqlite3BtreeGetPageSize(pBt);
     if (codec && (!codec->pagebuf || codec->pagesize != pagesize)) {
-        unsigned char *new = sqlite3_malloc(pagesize);
-        if (!new) return SQLITE_NOMEM;
-        sqlite3_free(codec->pagebuf);
-        codec->pagesize = pagesize;
+        void *new = sqlite3_malloc(pagesize);
+        if (!new) {
+            codec_free(codec);
+            return SQLITE_NOMEM;
+        }
+        if (codec->pagebuf) {
+            int i = 0;
+            while (i < codec->pagesize)
+                ((volatile char *)codec->pagebuf)[i++] = '\0';
+            sqlite3_free(codec->pagebuf);
+        }
         codec->pagebuf = new;
+        codec->pagesize = pagesize;
     }
 
     /* Set pager codec */
@@ -226,35 +243,33 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *zKey, int nKey)
     if (zKey) {
         /* Attach with the provided key */
         Btree *pBt = db->aDb[nDb].pBt;
-        if (pBt && (codec = codec_new(zKey, nKey))) {
-            if ((rc = codec_set_to(codec, pBt)) == SQLITE_OK) {
-                int count;
-                Pager *pager;
-                DbPage *page;
-                sqlite3PagerSharedLock((pager = sqlite3BtreePager(pBt)));
-                sqlite3PagerPagecount(pager, &count);
-                if (count > 0) {
-                    /* Read page1 (to trigger codec_kdf) */
-                    sqlite3PcacheTruncate(pager->pPCache, 0);
-                    if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK)
-                        sqlite3PagerUnref(page);
-                    else codec_set_to(NULL, pBt);
-                } else {
-                    /* Generate a new salt for an empty database */
-                    chacha20_rng(codec->salt, 16);
-                    codec_kdf(codec);
-                }
-                pager_unlock(pager);
+        if (pBt && (codec = codec_new(zKey, nKey))
+                && (rc = codec_set_to(codec, pBt)) == SQLITE_OK) {
+            int count;
+            Pager *pager;
+            DbPage *page;
+            sqlite3PagerSharedLock((pager = sqlite3BtreePager(pBt)));
+            sqlite3PagerPagecount(pager, &count);
+            if (count > 0) {
+                /* Read page1 (to read the salt and trigger codec_kdf) */
+                sqlite3PcacheTruncate(pager->pPCache, 0);
+                if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK)
+                    sqlite3PagerUnref(page);
+                else rc = codec_set_to(NULL, pBt);
+            } else {
+                /* Generate a new salt for an empty database */
+                chacha20_rng(codec->salt, 16);
+                codec_kdf(codec);
             }
+            pager_unlock(pager);
         }
     } else if (nDb != 0 && nKey > 0) {
         /* Use the main DB's encryption */
         Codec *mcodec = sqlite3PagerGetCodec(sqlite3BtreePager(db->aDb[0].pBt));
         if (mcodec) {
             Btree *pBt = db->aDb[nDb].pBt;
-            if (pBt && (codec = codec_dup(mcodec))) {
+            if (pBt && (codec = codec_dup(mcodec)))
                 rc = codec_set_to(codec, pBt);
-            }
         } else {
             /* No encryption */
             rc = SQLITE_OK;
