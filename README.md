@@ -31,7 +31,7 @@ Cryptography buzzwords
 - Poly1305 authentication tags.
 
 A low-level description of the encryption scheme can be found in
-[sqleet.c:80](sqleet.c#L80).
+[sqleet.c:79](sqleet.c#L79).
 
 
 Example
@@ -95,9 +95,10 @@ SQLITE_API int sqlite3_key(      /* Invoked by PRAGMA key='x' */
 ```
 
 `sqlite3_key()` is typically called immediately after `sqlite3_open()` to
-specify an encryption key for the opened database. Note that the function does
-not touch the data on disk. Subsequent attempts to read or write the database
-will fail if the key was incorrect.
+specify an encryption key for the opened database. The function returns
+`SQLITE_OK` if the given key was correct. Otherwise a non-zero SQLite3 error
+code is returned and subsequent attempts to read or write the database will
+fail.
 
 ```c
 SQLITE_API int sqlite3_rekey(    /* Invoked by PRAGMA rekey='x' */
@@ -109,4 +110,5 @@ SQLITE_API int sqlite3_rekey(    /* Invoked by PRAGMA rekey='x' */
 `sqlite3_rekey()` changes the database encryption key. This includes encrypting
 the database the first time, decrypting the database (if nKey == 0), as well as
 re-encrypting it with a new key. Internally, `sqlite3_rekey()` performs a
-`VACUUM` to encrypt/decrypt all pages of the database.
+`VACUUM` to encrypt/decrypt all pages of the database. The return value is
+`SQLITE_OK` on success.
