@@ -1,7 +1,7 @@
 sqleet
 ======
 
-**sqleet** is a public domain encryption extension for SQLite.
+**sqleet** is a public domain encryption extension for SQLite3.
 
 
 Compiling
@@ -31,7 +31,7 @@ Cryptography buzzwords
 - Poly1305 authentication tags.
 
 A low-level description of the encryption scheme can be found in
-[sqleet.c:79](sqleet.c#L79).
+[sqleet.c:96](sqleet.c#L96).
 
 
 Example
@@ -112,3 +112,15 @@ the database the first time, decrypting the database (if nKey == 0), as well as
 re-encrypting it with a new key. Internally, `sqlite3_rekey()` performs a
 `VACUUM` to encrypt/decrypt all pages of the database. The return value is
 `SQLITE_OK` on success.
+
+
+Versioning scheme
+-----------------
+
+[The sqleet releases](https://github.com/resilar/sqleet/releases/) follow a
+perverse form of semantic versioning which requires some explanation. Major
+version number increments indicate compatibility breaks as usual, but the minor
+& patch version numbers match the targeted SQLite3 version. For example, sqleet
+v0.20.0 corresponds to SQLite v3.20.0. Note that even though the target SQLite3
+version is the most supported, sqleet is typically forward and backward
+compatible across different SQLite3 versions.
