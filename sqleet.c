@@ -1,12 +1,22 @@
+/*
+ * SQLite3 configuration.
+ */
 #ifndef SQLITE_HAS_CODEC
 #define SQLITE_HAS_CODEC 1
 #endif
+#ifndef SQLITE_TEMP_STORE
 #define SQLITE_TEMP_STORE 2
+#endif
 
-#ifndef BYTE16TO23_UNENCRYPTED
-/* Default value: 0 for compatibility with earlier versions of sqleet */
-/* Set to 1 to keep bytes 16 to 23 of the database header unencrypted */
-#define BYTE16TO23_UNENCRYPTED 0
+/*
+ * sqleet_configuration.
+ *
+ * # SKIP_HEADER_BYTES
+ * Keep this many bytes unencrypted in the beginning of the database header.
+ * Use 24 for better compatibility with the SQLite3 Encryption Extension (SEE).
+ */
+#ifndef SKIP_HEADER_BYTES
+#define SKIP_HEADER_BYTES 0
 #endif
 
 #include "sqlite3.c"
@@ -131,14 +141,7 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
     unsigned char otk[64], tag[16], *data = pdata;
     Codec *reader = ((Codec *)codec)->reader;
     Codec *writer = ((Codec *)codec)->writer;
-
-#if BYTE16TO23_UNENCRYPTED != 0
-            /* Keep bytes 16 to 23 of the database header unencrypted */
-            int offset = (page == 1) ? 24 : 0;
-#else
-            /* Always encrypt complete page 1 */
-            int offset = 0;
-#endif
+    const int skip = (page == 1) ? SKIP_HEADER_BYTES : 0;
 
     switch (mode) {
     case 0: /* Journal decryption */
@@ -158,14 +161,12 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
 
             /* Verify the MAC */
             poly1305(data, n + PAGE_NONCE_LEN, otk, tag);
-            if (!poly1305_tagcmp(data + n + PAGE_NONCE_LEN, tag)) {
-                /* Decrypt */
-                chacha20_xor(data + offset, n - offset, otk+32, data + n, counter+1);
-                if (page == 1) memcpy(data, "SQLite format 3", 16);
-            } else {
-                /* Bad MAC */
-                data = NULL;
-            }
+            if (poly1305_tagcmp(data + n + PAGE_NONCE_LEN, tag) != 0)
+                return NULL;
+
+            /* Decrypt */
+            chacha20_xor(data + skip, n - skip, otk+32, data + n, counter+1);
+            if (page == 1) memcpy(data, "SQLite format 3", 16);
         }
         break;
 
@@ -184,7 +185,7 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
             chacha20_xor(otk, 64, writer->key, data + n, counter);
 
             /* Encrypt and authenticate */
-            chacha20_xor(data + offset, n - offset, otk+32, data + n, counter+1);
+            chacha20_xor(data + skip, n - skip, otk+32, data + n, counter+1);
             if (page == 1) memcpy(data, writer->salt, 16);
             poly1305(data, n + PAGE_NONCE_LEN, otk, data + n + PAGE_NONCE_LEN);
         }
@@ -358,10 +359,11 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
             /* Decrypt */
             if (reader) {
                 reader->writer = NULL;
-                if ((rc = sqlite3RunVacuumForRekey(&err, db, nDb, 0)) == SQLITE_OK) {
+                rc = sqlite3RunVacuumForRekey(&err, db, nDb, 0);
+                if (rc == SQLITE_OK) {
                     rc = codec_set_to(NULL, pBt);
                 } else {
-                  reader->writer = reader->reader;
+                    reader->writer = reader->reader;
                 }
             } else {
                 rc = codec_verify_page1(NULL, pBt);

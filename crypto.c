@@ -547,7 +547,7 @@ static size_t entropy(void *buf, size_t n)
 }
 
 #else
-# error "Secure pseudorandom number generator unimplemented for this OS"
+#error "Secure pseudorandom number generator unimplemented for this OS"
 #endif
 
 /*
