@@ -7,7 +7,7 @@
 ** the original function sqlite3RunVacuum of the new version for relevant changes, and
 ** to incorporate them in the adjusted function below.
 **
-** The code below is based on SQLite version 3.21.0.
+** The code below is based on SQLite version 3.23.0.
 */
 
 /*
