@@ -7,7 +7,7 @@
 ** the original function sqlite3RunVacuum of the new version for relevant changes, and
 ** to incorporate them in the adjusted function below.
 **
-** The code below is based on SQLite version 3.23.0.
+** The code below is based on SQLite version 3.24.0.
 */
 
 /*
@@ -143,7 +143,7 @@ SQLITE_PRIVATE int sqlite3RunVacuumForRekey(char **pzErrMsg, sqlite3 *db, int iD
   if( rc!=SQLITE_OK ) goto end_of_vacuum;
   rc = execSqlF(db, pzErrMsg,
       "SELECT sql FROM \"%w\".sqlite_master"
-      " WHERE type='index' AND length(sql)>10",
+      " WHERE type='index'",
       zDbMain
   );
   if( rc!=SQLITE_OK ) goto end_of_vacuum;
