@@ -9,7 +9,7 @@
 #endif
 
 /*
- * sqleet_configuration.
+ * sqleet configuration.
  *
  * # SKIP_HEADER_BYTES
  * Keep this many bytes unencrypted in the beginning of the database header.
