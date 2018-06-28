@@ -66,8 +66,8 @@ void codec_kdf(Codec *codec)
 {
     pbkdf2_hmac_sha256(codec->zKey, codec->nKey, codec->salt, 16, 12345,
                        codec->key, 32);
-    while (codec->nKey) ((volatile char *)codec->zKey)[--codec->nKey] = '\0';
     codec->zKey = NULL;
+    codec->nKey = 0;
 }
 
 void codec_free(void *pcodec)
@@ -76,11 +76,6 @@ void codec_free(void *pcodec)
         int i;
         volatile char *p;
         Codec *codec = pcodec;
-        if (codec->zKey) {
-            p = (void *)codec->zKey;
-            for (i = 0; i < codec->nKey; p[i++] = '\0');
-            /* zKey memory is allocated by the user */
-        }
         if (codec->pagebuf) {
             p = codec->pagebuf;
             for (i = 0; i < codec->pagesize; p[i++] = '\0');
