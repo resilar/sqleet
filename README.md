@@ -174,7 +174,7 @@ Versioning scheme
 perverse form of semantic versioning which requires some explanation. Major
 version number increments indicate compatibility breaks as usual, but the minor
 & patch version numbers match the targeted SQLite3 version. For example, sqleet
-v0.20.0 corresponds to SQLite v3.20.0. Although the target SQLite3 version is
+v0.25.1 corresponds to SQLite v3.25.1. Although the target SQLite3 version is
 the primarily supported, sqleet is typically forward and backward compatible
 across different SQLite3 versions without any changes to the source code.
 

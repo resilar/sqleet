@@ -7,7 +7,7 @@
 ** the original function sqlite3RunVacuum of the new version for relevant changes, and
 ** to incorporate them in the adjusted function below.
 **
-** The code below is based on SQLite version 3.24.0.
+** The code below is based on SQLite version 3.25.1.
 */
 
 /*
@@ -29,7 +29,7 @@ SQLITE_PRIVATE int sqlite3RunVacuumForRekey(char **pzErrMsg, sqlite3 *db, int iD
   /*int nRes;*/               /* Bytes of reserved space at the end of each page */
   int nDb;                /* Number of attached databases */
   const char *zDbMain;    /* Schema name of database to vacuum */
-  
+
   if( !db->autoCommit ){
     sqlite3SetString(pzErrMsg, db, "cannot VACUUM from within a transaction");
     return SQLITE_ERROR;
@@ -108,7 +108,7 @@ SQLITE_PRIVATE int sqlite3RunVacuumForRekey(char **pzErrMsg, sqlite3 *db, int iD
   */
   rc = execSql(db, pzErrMsg, "BEGIN");
   if( rc!=SQLITE_OK ) goto end_of_vacuum;
-  rc = sqlite3BtreeBeginTrans(pMain, 2);
+  rc = sqlite3BtreeBeginTrans(pMain, 2, 0);
   if( rc!=SQLITE_OK ) goto end_of_vacuum;
 
   /* Do not attempt to change the page size for a WAL database */

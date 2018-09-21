@@ -396,7 +396,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
 
         /* Change key (re-encrypt) */
         reader->writer = codec;
-        rc = sqlite3BtreeBeginTrans(pBt, 1);
+        rc = sqlite3BtreeBeginTrans(pBt, 1, NULL);
         for (pgno = 1; rc == SQLITE_OK && pgno <= pager->dbSize; pgno++) {
             /* The DB page occupied by the PENDING_BYTE is never used */
             if (pgno == PENDING_BYTE_PAGE(pager))
