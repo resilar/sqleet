@@ -1,24 +1,4 @@
-/*
- * SQLite3 configuration.
- */
-#ifndef SQLITE_HAS_CODEC
-#define SQLITE_HAS_CODEC 1
-#endif
-#ifndef SQLITE_TEMP_STORE
-#define SQLITE_TEMP_STORE 2
-#endif
-
-/*
- * sqleet configuration.
- *
- * # SKIP_HEADER_BYTES
- * Keep this many bytes unencrypted in the beginning of the database header.
- * Use 24 for better compatibility with the SQLite3 Encryption Extension (SEE).
- */
-#ifndef SKIP_HEADER_BYTES
-#define SKIP_HEADER_BYTES 0
-#endif
-
+#include "config.c"
 #include "sqlite3.c"
 #include "rekeyvacuum.c"
 #include "crypto.c"
