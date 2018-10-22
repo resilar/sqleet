@@ -131,6 +131,10 @@ re-encrypting it with a new key. Internally, `sqlite3_rekey()` performs a
 `VACUUM` to encrypt/decrypt all pages of the database. The return value is
 `SQLITE_OK` on success and a SQLite3 error code on failure.
 
+In addition, there are `sqlite3_key_v2()` and `sqlite3_rekey_v2()` functions
+that accept the target database name as the second parameter. By default, the
+main database is used.
+
 
 Android support
 ---------------
