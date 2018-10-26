@@ -42,10 +42,83 @@ Codec *codec_dup(Codec *src)
     return codec;
 }
 
-void codec_kdf(Codec *codec)
+static int hex_decode(const char *hex, unsigned int n, char *out)
 {
-    pbkdf2_hmac_sha256(codec->zKey, codec->nKey, codec->salt, 16, 12345,
-                       codec->key, 32);
+    int i;
+    for (i = 0; i < n; i++) {
+        char c = hex[i];
+        if (c >= '0' && c <= '9') {
+            c = c - '0';
+        } else if (c >= 'A' && c <= 'F') {
+            c = c - 'A' + 10;
+        } else if (c >= 'a' && c <= 'f') {
+            c = c - 'a' + 10;
+        } else {
+            const int j = (i+1) / 2;
+            for (i = 0; i < j; i++) {
+                ((volatile char *)out)[i] = 0;
+            }
+            return 0;
+        }
+        out[i/2] = (out[i/2] << 4) | c;
+    }
+    return 1;
+}
+
+void codec_kdf(Codec *codec, const void *salt)
+{
+    int bypass = 0;
+
+    /* Bypass key derivation if the key string starts with "raw:" */
+    if (codec->nKey > 4 && !memcmp(codec->zKey, "raw:", 4)) {
+        const int nRaw = codec->nKey - 4;
+        const char *zRaw = (const char *)codec->zKey + 4;
+        switch (nRaw) {
+        /* Binary key (and salt) */
+        case 32 + 16:
+            salt = memcpy(codec->salt, zRaw + 32, 16);
+            /* fall-through */
+        case 32:
+            memcpy(codec->key, zRaw, 32);
+            bypass = 1;
+            break;
+
+        /* Hex-encoded key */
+        case 64:
+            bypass = !!hex_decode(zRaw, 64, codec->key);
+            break;
+
+        /* Hex-encoded key and salt */
+        case 64 + 32:
+            if (!hex_decode(zRaw, 64, codec->key))
+                break;
+            if (!hex_decode(zRaw + 64, 32, codec->salt))
+                break;
+            salt = codec->salt;
+            bypass = 1;
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    if (!salt) {
+        /* Generate a random salt */
+        chacha20_rng(codec->salt, 16);
+    } else if (salt != codec->salt) {
+        /* Save the specified salt */
+        memcpy(codec->salt, salt, 16);
+    }
+
+    if (!bypass) {
+        /* Run key-derivation algorithm on the key string with the salt */
+        pbkdf2_hmac_sha256(codec->zKey, codec->nKey,
+                           codec->salt, 16,
+                           12345,
+                           codec->key, 32);
+    }
+
     codec->zKey = NULL;
     codec->nKey = 0;
 }
@@ -123,11 +196,9 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
     case 2: /* Reload a page */
     case 3: /* Load a page */
         if (reader) {
-            int n = reader->pagesize - PAGE_RESERVED_LEN;
-            if (page == 1 && reader->zKey) {
-                memcpy(reader->salt, data, 16);
-                codec_kdf(reader);
-            }
+            const int n = reader->pagesize - PAGE_RESERVED_LEN;
+            if (page == 1 && reader->zKey)
+                codec_kdf(reader, data);
 
             /* Generate one-time keys */
             memset(otk, 0, 64);
@@ -150,7 +221,7 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
         /* fall-through */
     case 6: /* Encrypt a main database page */
         if (writer) {
-            int n = writer->pagesize - PAGE_RESERVED_LEN;
+            const int n = writer->pagesize - PAGE_RESERVED_LEN;
             data = memcpy(writer->pagebuf, data, writer->pagesize);
 
             /* Generate one-time keys */
@@ -189,9 +260,8 @@ static int codec_verify_page1(Codec *codec, Btree *pBt)
             sqlite3PagerSetCodec(pager, NULL, NULL, NULL, NULL);
         }
     } else if (codec && codec->zKey) {
-        /* Generate a salt and derive an encryption key for an empty database */
-        chacha20_rng(codec->salt, 16);
-        codec_kdf(codec);
+        /* Derive an encryption key for an empty database */
+        codec_kdf(codec, NULL);
     }
     pager_unlock(pager);
     return rc;
@@ -349,13 +419,15 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
         /* Create a codec for the given key */
         if ((codec = codec_new(zKey, nKey))) {
             codec->pagesize = sqlite3BtreeGetPageSize(pBt);
-            if ((codec->pagebuf = sqlite3_malloc(codec->pagesize))) {
-                chacha20_rng(codec->salt, 16);
-                codec_kdf(codec);
+            codec->pagebuf = sqlite3_malloc(codec->pagesize);
+            if (codec->pagebuf) {
+                codec_kdf(codec, NULL);
+            } else {
+                codec_free(codec);
+                codec = NULL;
             }
         }
-        if (!codec || !codec->pagebuf) {
-            codec_free(codec);
+        if (!codec) {
             rc = SQLITE_NOMEM;
             goto leave;
         }

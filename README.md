@@ -42,7 +42,7 @@ Cryptography buzzwords
 - Poly1305 authentication tags.
 
 A low-level description of the encryption scheme is available in
-[sqleet.c:71](sqleet.c#L71).
+[sqleet.c:144](sqleet.c#L144).
 
 
 Example
@@ -134,6 +134,15 @@ re-encrypting it with a new key. Internally, `sqlite3_rekey()` performs a
 In addition, there are `sqlite3_key_v2()` and `sqlite3_rekey_v2()` functions
 that accept the target database name as the second parameter. By default, the
 main database is used.
+
+The above functions pass the provided key string (password) to a key derivation
+algorithm (i.e., PBKDF2-HMAC-SHA256 with a 16-byte salt and 12345 iterations).
+Optionally, the user can bypass the key derivation by specifying a raw key in
+format `raw:K` where `K` is a 32-byte binary string or a 64-digit hex-encoded
+string. This is useful in programs that use sqleet as a library and want to
+handle key derivation by themselves. Additionally, the raw key string can also
+be followed by a 16-byte (or 32-hexdigit) salt which is stored in the beginning
+of the database file (otherwise a random salt is generated).
 
 
 Android support
