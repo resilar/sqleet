@@ -94,8 +94,8 @@ void codec_free(void *pcodec)
  *   - The XOR with page_no prevents malicious reordering of the pages.
  *
  * - The nonce consists of 128 randomly generated bits, which should be enough
- *   to guarantee uniqueness with a reasonable pseudorandom number generator.
- *   - Given a perfect RNG, the adversary needs to observe at least 2^61 nonces
+ *   to guarantee uniqueness with a secure pseudorandom number generator.
+ *   - Given a secure PRNG, the adversary needs to observe at least 2^61 nonces
  *     to break Poly1305 with the birthday attack at a success rate of 1%.
  *   - If a nonce is reused, we lose confidentiality of the associated messages.
  *     Moreover, the compromised nonce can also be used to forge valid tags for
