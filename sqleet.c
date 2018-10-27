@@ -42,7 +42,7 @@ Codec *codec_dup(Codec *src)
     return codec;
 }
 
-static int hex_decode(const char *hex, unsigned int n, char *out)
+static int hex_decode(const char *hex, unsigned int n, unsigned char *out)
 {
     int i;
     for (i = 0; i < n; i++) {
@@ -56,7 +56,7 @@ static int hex_decode(const char *hex, unsigned int n, char *out)
         } else {
             const int j = (i+1) / 2;
             for (i = 0; i < j; i++) {
-                ((volatile char *)out)[i] = 0;
+                ((volatile unsigned char *)out)[i] = 0;
             }
             return 0;
         }
