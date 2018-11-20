@@ -465,7 +465,6 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
 #include <sys/syscall.h>
 
 #ifdef __linux__
-#include <stropts.h>
 #include <linux/random.h>
 #endif
 
