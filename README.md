@@ -142,7 +142,12 @@ format `raw:K` where `K` is a 32-byte binary string or a 64-digit hex-encoded
 string. This is useful in programs that use sqleet as a library and want to
 handle key derivation by themselves. Additionally, the raw key string can also
 be followed by a 16-byte (or 32-hexdigit) salt which is stored in the beginning
-of the database file (otherwise a random salt is generated).
+of the database file (otherwise a random salt is generated). **Warning:** In
+any way erroneous raw key (e.g., unsupported length or invalid hex-encoding)
+results in the key being handled as a normal key including the `raw:` prefix.
+Moreover, specifying a salt makes sense only when creating a new database or
+re-encrypting an existing database, because otherwise the specified salt is
+overridden by the salt stored in the database file.
 
 
 Android support
