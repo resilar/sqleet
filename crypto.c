@@ -1,5 +1,6 @@
 /* This file is included by sqleet.c */
 #include <stdint.h>
+#include <string.h>
 
 #define ROL32(x, c) (((x) << (c)) | ((x) >> (32-(c))))
 #define ROR32(x, c) (((x) >> (c)) | ((x) << (32-(c))))
@@ -461,11 +462,17 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
  */
 #if defined(__unix__) || defined(__APPLE__)
 #define _GNU_SOURCE
-#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 
 #ifdef __linux__
 #include <linux/random.h>
+#include <sys/ioctl.h>
 #endif
 
 /* Returns the number of urandom bytes read (either 0 or n) */
