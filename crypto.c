@@ -563,13 +563,15 @@ void chacha20_rng(void *out, size_t n)
 {
     static size_t available = 0;
     static uint32_t counter = 0xFFFFFFFF;
-    static unsigned char key[32], nonce[12], buffer[64];
-    sqlite3_mutex *mutex;
-    size_t m;
+    static unsigned char key[32], nonce[12], buffer[64] = {0};
     
-    mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_PRNG);
+#if SQLITE3_THREADSAFE
+    sqlite3_mutex *mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_PRNG);
     sqlite3_mutex_enter(mutex);
+#endif
+
     while (n > 0) {
+        size_t m;
         if (available == 0) {
             if (counter == 0xFFFFFFFF) {
                 if (entropy(key, sizeof(key)) != sizeof(key))
@@ -587,5 +589,8 @@ void chacha20_rng(void *out, size_t n)
         available -= m;
         n -= m;
     }
+
+#if SQLITE3_THREADSAFE
     sqlite3_mutex_leave(mutex);
+#endif
 }
