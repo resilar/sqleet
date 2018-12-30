@@ -67,8 +67,7 @@ static void chacha20_block(unsigned char out[64], const uint32_t in[16])
     #undef QR
     for (i = 0; i < 16; i++) {
         const uint32_t v = x[i] + in[i];
-        STORE32_LE(out, v);
-        out += 4;
+        STORE32_LE(&out[4*i], v);
     }
 }
 
@@ -102,9 +101,8 @@ void chacha20_xor(unsigned char *data, size_t n, const unsigned char key[32],
 
     while (n >= 64) {
         chacha20_block(block, state);
-        for (i = 0; i < 64; i++) {
+        for (i = 0; i < 64; i++)
             data[i] ^= block[i];
-        }
         state[12]++;
         data += 64;
         n -= 64;
@@ -112,9 +110,8 @@ void chacha20_xor(unsigned char *data, size_t n, const unsigned char key[32],
 
     if (n > 0) {
         chacha20_block(block, state);
-        for (i = 0; i < n; i++) {
+        for (i = 0; i < n; i++)
             data[i] ^= block[i];
-        }
     }
     return;
 }
@@ -328,9 +325,8 @@ void sha256_update(struct sha256 *ctx, const unsigned char *data, size_t n)
 {
     if (n < 64 || ctx->n) {
         int i, j = (ctx->n + n < 64) ? n : 64 - ctx->n;
-        for (i = 0; i < j; i++) {
+        for (i = 0; i < j; i++)
             ctx->buffer[ctx->n + i] = data[i];
-        }
         if ((ctx->n += j) < 64)
             return;
         sha256_block(ctx->state, ctx->buffer);
@@ -523,7 +519,7 @@ static size_t read_urandom(void *buf, size_t n)
     /* Tiny n may unintentionally fall through! */
 
 fail:
-    fprintf(stderr, "bad /dev/urandom RNG)\n");
+    fprintf(stderr, "bad /dev/urandom RNG\n");
     abort(); /* PANIC! */
     return 0;
 }
