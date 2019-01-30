@@ -28,7 +28,16 @@ while IFS='' read -r ln; do
     else
         printf "%s\n" "$ln"
     fi
-done <sqleet.c >tmp-sqleet.c || die "sqleet amalgamation failed"
+done <sqleet.c >tmp-sqleet.c || die "sqleet.c amalgamation failed"
+
+echo "[+] Generating sqleet.h amalgamation" >&2
+while IFS='' read -r ln; do
+    if echo "$ln" | grep -q '^#include "[^"]\+"$'; then
+        cat "$(printf "%s\n" "$ln" | sed 's/^#include "\([^"]\+\)"/\1/')"
+    else
+        printf "%s\n" "$ln"
+    fi
+done <sqleet.h >tmp-sqleet.h || die "sqleet.h amalgamation failed"
 
 echo '[+] Updating shell.c #include "sqlite3.h" -> "sqleet.h"' >&2
 sed -i 's/^#include "sqlite3.h"$/#include "sqleet.h"/' shell.c
@@ -38,7 +47,6 @@ echo "[+] Moving files around a bit" >&2
 mv tmp-sqleet.c sqleet.c
 mv tmp-rekeyvacuum.c rekeyvacuum.c
 git add sqleet.c shell.c
-git mv sqlite3.h sqleet.h
 git ls-files | grep ".c$" | grep -v "sqleet.c\|shell.c" | xargs git rm -fq
 git rm -fqr script/
 

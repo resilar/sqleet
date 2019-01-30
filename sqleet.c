@@ -1,4 +1,4 @@
-#include "config.c"
+#include "sqleet-config.h"
 #include "sqlite3.c"
 #include "rekeyvacuum.c"
 #include "crypto.c"
@@ -6,7 +6,7 @@
 /*
  * SQLite3 codec implementation.
  */
-typedef struct codec { 
+typedef struct codec {
     struct codec *reader, *writer;
     unsigned char key[32], salt[16];
     void *pagebuf;
