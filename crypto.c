@@ -561,7 +561,7 @@ void chacha20_rng(void *out, size_t n)
     static uint32_t counter = UINT32_MAX;
     static unsigned char key[32], nonce[12], buffer[64] = {0};
     
-#if SQLITE3_THREADSAFE
+#if SQLITE_THREADSAFE
     sqlite3_mutex *mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_PRNG);
     sqlite3_mutex_enter(mutex);
 #endif
@@ -585,7 +585,7 @@ void chacha20_rng(void *out, size_t n)
         n -= m;
     }
 
-#if SQLITE3_THREADSAFE
+#if SQLITE_THREADSAFE
     sqlite3_mutex_leave(mutex);
 #endif
 }
