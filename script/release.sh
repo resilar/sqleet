@@ -4,7 +4,7 @@
 set -e
 
 die() {
-    rm -f tmp-rekeyvacuum.c tmp-sqleet.c
+    rm -f tmp-rekeyvacuum.c tmp-sqleet.c tmp-sqleet.h
     [ "$#" -ne 0 ] && echo "[-] Error:" "$@" >&2
     exit 1
 }
@@ -45,9 +45,10 @@ grep -Fq '#include "sqleet.h"' shell.c || die "failed to update shell.c include"
 
 echo "[+] Moving files around a bit" >&2
 mv tmp-sqleet.c sqleet.c
+mv tmp-sqleet.h sqleet.h
 mv tmp-rekeyvacuum.c rekeyvacuum.c
-git add sqleet.c shell.c
-git ls-files | grep ".c$" | grep -v "sqleet.c\|shell.c" | xargs git rm -fq
+git add sqleet.c sqleet.h shell.c
+git ls-files | grep ".c$\|.h$" | grep -v "sqleet.c\|sqleet.h\|shell.c" | xargs git rm -fq
 git rm -fqr script/
 
 sync
