@@ -12,8 +12,7 @@ die() {
 cd "$(git rev-parse --show-toplevel)"
 [ "$(git symbolic-ref --short -q HEAD)" = "master" ] || die "checkout master first"
 git status --short | grep -vq '^[!?]' && die "dirty working tree (commit or stash your changes)"
-
-VERSION="$(sed -nr 's/^#define SQLITE_VERSION[^"]*"([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' sqlite3.h)"
+VERSION="$(sed -n 's/^#define SQLITE_VERSION[^"]*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)"$/\1/p' sqlite3.h)"
 [ -z "$VERSION" ] && die "cannot find SQLite3 version"
 
 echo "[+] SQLite version $VERSION" >&2
@@ -22,13 +21,7 @@ echo "[+] Generating rekeyvacuum.c" >&2
 ./script/rekeyvacuum.sh sqlite3.c >>tmp-rekeyvacuum.c || die
 
 echo "[+] Generating sqleet.c amalgamation" >&2
-while IFS='' read -r ln; do
-    if echo "$ln" | grep -q '^#include "[^"]\+"$'; then
-        cat "$(printf "%s\n" "$ln" | sed 's/^#include "\([^"]\+\)"/\1/')"
-    else
-        printf "%s\n" "$ln"
-    fi
-done <sqleet.c >tmp-sqleet.c || die "sqleet amalgamation failed"
+./script/amalgamate.sh <sqleet.c >tmp-sqleet.c || die "sqleet amalgamation failed"
 
 echo '[+] Updating shell.c #include "sqlite3.h" -> "sqleet.h"' >&2
 sed -i 's/^#include "sqlite3.h"$/#include "sqleet.h"/' shell.c
