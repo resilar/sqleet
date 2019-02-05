@@ -32,6 +32,9 @@ replacements for the official `sqlite3.c` amalgamation and `sqlite3.h` header.
 The C interface of the sqleet encryption extension is described in section
 [SQLite3 encryption API](#sqlite3-encryption-api).
 
+Run `./script/amalgamate.sh <sqleet.c >amalgamation.c` to produce amalgamation
+of custom SQLite3/sqleet version with encryption support.
+
 
 Cryptography buzzwords
 ----------------------

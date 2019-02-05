@@ -12,7 +12,7 @@ die() {
     exit 2
 }
 
-VERSION="$(sed -nr 's/^#define SQLITE_VERSION[^"]*"([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' sqlite3.c)"
+VERSION="$(sed -n 's/^#define SQLITE_VERSION[^"]*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)"$/\1/p' sqlite3.h)"
 [ -z "$VERSION" ] && die "Cannot find SQLite3 version"
 
 cat <<EOF
