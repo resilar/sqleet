@@ -404,7 +404,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
             /* Decrypt */
             if (reader) {
                 reader->writer = NULL;
-                rc = sqlite3RunVacuumForRekey(&err, db, nDb, 0);
+                rc = sqlite3RekeyVacuum(&err, db, nDb, NULL, 0);
                 if (rc == SQLITE_OK) {
                     rc = codec_set_to(NULL, pBt);
                 } else {
@@ -436,7 +436,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
             /* Encrypt */
             codec->reader = NULL;
             if ((rc = codec_set_to(codec, pBt)) == SQLITE_OK) {
-                rc = sqlite3RunVacuumForRekey(&err, db, nDb, PAGE_RESERVED_LEN);
+                rc = sqlite3RekeyVacuum(&err, db, nDb, NULL, PAGE_RESERVED_LEN);
                 if (rc == SQLITE_OK) {
                     codec->reader = codec->writer;
                 } else {
