@@ -30,3 +30,7 @@
 #ifndef SQLITE_TEMP_STORE
 #define SQLITE_TEMP_STORE 2
 #endif
+
+#ifndef SQLITE3_H_OMIT
+#include "sqlite3.h"
+#endif

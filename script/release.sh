@@ -4,7 +4,7 @@
 set -e
 
 die() {
-    rm -f tmp-rekeyvacuum.c tmp-sqleet.c
+    rm -f tmp-rekeyvacuum.c tmp-sqleet.c tmp-sqleet.h
     [ "$#" -ne 0 ] && echo "[-] Error:" "$@" >&2
     exit 1
 }
@@ -18,22 +18,24 @@ VERSION="$(sed -n 's/^#define SQLITE_VERSION[^"]*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)"
 echo "[+] SQLite version $VERSION" >&2
 
 echo "[+] Generating rekeyvacuum.c" >&2
-./script/rekeyvacuum.sh sqlite3.c >>tmp-rekeyvacuum.c || die
+./script/rekeyvacuum.sh sqlite3.c >tmp-rekeyvacuum.c || die "generating rekeyvacuum.c failed"
 
 echo "[+] Generating sqleet.c amalgamation" >&2
-./script/amalgamate.sh <sqleet.c >tmp-sqleet.c || die "sqleet amalgamation failed"
+./script/amalgamate.sh <sqleet.c >tmp-sqleet.c || die "sqleet.c amalgamation failed"
+
+echo "[+] Generating sqleet.h amalgamation" >&2
+./script/amalgamate.sh <sqleet.h >tmp-sqleet.h || die "sqleet.h amalgamation failed"
 
 echo '[+] Updating shell.c #include "sqlite3.h" -> "sqleet.h"' >&2
 sed -i 's/^#include "sqlite3.h"$/#include "sqleet.h"/' shell.c
 grep -Fq '#include "sqleet.h"' shell.c || die "failed to update shell.c include"
 
 echo "[+] Moving files around a bit" >&2
+mv tmp-sqleet.h sqleet.h
 mv tmp-sqleet.c sqleet.c
 mv tmp-rekeyvacuum.c rekeyvacuum.c
-git add sqleet.c shell.c
-git mv sqlite3.h sqleet.h
-git ls-files | grep ".c$" | grep -v "sqleet.c\|shell.c" | xargs git rm -fq
-git rm -fqr script/
+git add sqleet.c sqleet.h shell.c
+git ls-files | grep ".[ch]$\|^script/" | grep -v "sqleet.[ch]\|shell.c" | xargs git rm -fq
 
 sync
 SQLEET_VERSION="$(echo "$VERSION" | sed 's/^3/0/')"

@@ -1,4 +1,5 @@
-#include "config.c"
+#define SQLITE3_H_OMIT
+#include "sqleet.h"
 #include "sqlite3.c"
 #include "rekeyvacuum.c"
 #include "crypto.c"

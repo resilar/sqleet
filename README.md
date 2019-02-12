@@ -16,11 +16,11 @@ Compiling
 SQLite3 shell with sqleet encryption support can be compiled as follows:
 
 ```sh
-    % # UNIX
-    % gcc sqleet.c shell.c -o sqleet -lpthread -ldl
+% # UNIX
+% gcc sqleet.c shell.c -o sqleet -lpthread -ldl
 
-    % # Windows
-    % gcc sqleet.c shell.c -o sqleet
+% # Windows
+% gcc sqleet.c shell.c -o sqleet
 ```
 
 [Example](#example) illustrates sqleet encryption using the compiled shell.
@@ -45,7 +45,7 @@ Cryptography buzzwords
 - Poly1305 authentication tags.
 
 A low-level description of the encryption scheme is available in
-[sqleet.c:144](sqleet.c#L144).
+[sqleet.c:145](sqleet.c#L145).
 
 
 Example
