@@ -23,17 +23,21 @@ SQLite3 shell with sqleet encryption support can be compiled as follows:
 % gcc sqleet.c shell.c -o sqleet
 ```
 
-[Example](#example) illustrates sqleet encryption using the compiled shell.
+[Example](#example) illustrates sqleet encryption using the compiled shell. The
+C interface of the sqleet encryption extension is described in section [SQLite3
+encryption API](#sqlite3-encryption-api).
 
 To use sqleet as a library, the recommended way is to download a preconfigured
 [release package](https://github.com/resilar/sqleet/releases/latest) instead of
-cloning the master. The contained `sqleet.c` and `sqleet.h` files are drop-in
-replacements for the official `sqlite3.c` amalgamation and `sqlite3.h` header.
-The C interface of the sqleet encryption extension is described in section
-[SQLite3 encryption API](#sqlite3-encryption-api).
+cloning the source repository. Contained `sqleet.c` and `sqleet.h` files are
+drop-in replacements for the official `sqlite3.c` amalgamation and `sqlite3.h`
+header. Alternatively, `sqleet.c` and `sqleet.h` of the source repository can
+be used directly if all sqleet source files are available at compile time.
 
-Run `./script/amalgamate.sh <sqleet.c >amalgamation.c` to produce amalgamation
-of custom SQLite3/sqleet version with encryption support.
+To produce a custom release version of sqleet, run `./script/amalgamate.sh
+<sqleet.c >release.c` to create amalgamation of SQLite3 with sqleet encryption
+support. Likewise, `./script/amalgamate.sh <sqleet.h >release.h` to amalgamate
+the header.
 
 
 Cryptography buzzwords
