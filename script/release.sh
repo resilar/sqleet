@@ -1,10 +1,10 @@
 #!/bin/sh
-# Prepare sqleet.c sqleet.h amalgamation for a release.
+# Prepare release archives.
 
 set -e
 
 die() {
-    rm -f tmp-rekeyvacuum.c tmp-sqleet.c tmp-sqleet.h
+    [ ! -z "$RELEASE" ] && rm -rf "$RELEASE_DIR" "$RELEASE.zip" "$RELEASE.tar.gz"
     [ "$#" -ne 0 ] && echo "[-] Error:" "$@" >&2
     exit 1
 }
@@ -14,32 +14,33 @@ cd "$(git rev-parse --show-toplevel)"
 git status --short | grep -vq '^[!?]' && die "dirty working tree (commit or stash your changes)"
 VERSION="$(sed -n 's/^#define SQLITE_VERSION[^"]*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)"$/\1/p' sqlite3.h)"
 [ -z "$VERSION" ] && die "cannot find SQLite3 version"
+SQLEET_VERSION="$(echo "$VERSION" | sed 's/^3/0/')"
+RELEASE="sqleet-v$SQLEET_VERSION"
+RELEASE_DIR="$RELEASE"
 
 echo "[+] SQLite version $VERSION" >&2
 
-echo "[+] Generating rekeyvacuum.c" >&2
-./script/rekeyvacuum.sh sqlite3.c >tmp-rekeyvacuum.c || die "generating rekeyvacuum.c failed"
+echo "[+] Checking rekeyvacuum.c" >&2
+./script/rekeyvacuum.sh sqlite3.c | cmp -s - rekeyvacuum.c || die "rekeyvacuum.c outdated"
+
+echo "[+] Creating release directory $RELEASE_DIR" >&2
+mkdir -p "$RELEASE_DIR"
+cp README.md "$RELEASE_DIR"
 
 echo "[+] Generating sqleet.c amalgamation" >&2
-./script/amalgamate.sh <sqleet.c >tmp-sqleet.c || die "sqleet.c amalgamation failed"
+./script/amalgamate.sh <sqleet.c >"$RELEASE_DIR/sqleet.c" || die "sqleet.c amalgamation failed"
 
 echo "[+] Generating sqleet.h amalgamation" >&2
-./script/amalgamate.sh <sqleet.h >tmp-sqleet.h || die "sqleet.h amalgamation failed"
+./script/amalgamate.sh <sqleet.h >"$RELEASE_DIR/sqleet.h" || die "sqleet.h amalgamation failed"
 
 echo '[+] Updating shell.c #include "sqlite3.h" -> "sqleet.h"' >&2
-sed -i 's/^#include "sqlite3.h"$/#include "sqleet.h"/' shell.c
-grep -Fq '#include "sqleet.h"' shell.c || die "failed to update shell.c include"
+sed 's/^#include "sqlite3.h"$/#include "sqleet.h"/' shell.c >"$RELEASE_DIR/shell.c"
+grep -Fq '#include "sqleet.h"' "$RELEASE_DIR/shell.c" || die "failed to update shell.c include"
 
-echo "[+] Moving files around a bit" >&2
-mv tmp-sqleet.h sqleet.h
-mv tmp-sqleet.c sqleet.c
-mv tmp-rekeyvacuum.c rekeyvacuum.c
-git add sqleet.c sqleet.h shell.c
-git ls-files | grep ".[ch]$\|^script/" | grep -v "sqleet.[ch]\|shell.c" | xargs git rm -fq
+echo "[+] Creating release archives" >&2
+zip -qr "$RELEASE-amalgamation.zip" "$RELEASE_DIR" || die "failed to create $RELEASE-amalgamation.zip"
+tar -czf "$RELEASE-amalgamation.tar.gz" --owner=0 --group=0 "$RELEASE_DIR" || die "failed to create $RELEASE-amalgamation.tar.gz"
 
 sync
-SQLEET_VERSION="$(echo "$VERSION" | sed 's/^3/0/')"
 echo "[+] Success!" >&2
-echo "git checkout -b v$SQLEET_VERSION"
-echo "git commit -m \"Release v$SQLEET_VERSION\""
-echo "git push -u origin v$SQLEET_VERSION"
+echo "git tag v$SQLEET_VERSION && git push origin v$SQLEET_VERSION"
