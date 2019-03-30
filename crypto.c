@@ -455,7 +455,7 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
 /*
  * Platform-specific entropy functions for seeding RNG
  */
-#if defined(__unix__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
