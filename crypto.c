@@ -466,8 +466,11 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
 #include <unistd.h>
 
 #ifdef __linux__
-#include <linux/random.h>
 #include <sys/ioctl.h>
+/* musl does not have <linux/random.h> so let's define RNDGETENTCNT here */
+#ifndef RNDGETENTCNT
+#define RNDGETENTCNT 0x80045200
+#endif
 #endif
 
 /* Returns the number of urandom bytes read (either 0 or n) */
