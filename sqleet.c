@@ -13,6 +13,7 @@ typedef struct codec {
     struct codec *reader, *writer;
     unsigned char key[32], saltbuf[16], headerbuf[16];
     unsigned char *salt, *header;
+    int error;
     const void *zKey;
     int nKey;
     int skip;
@@ -27,6 +28,7 @@ Codec *codec_new(const char *zKey, int nKey, Btree *pBt)
         if ((codec->pagebuf = sqlite3_malloc(codec->pagesize))) {
             codec->reader = codec->writer = codec;
             codec->salt = codec->header = NULL;
+            codec->error = SQLITE_OK;
             codec->zKey = zKey;
             codec->nKey = nKey;
             /* Remaining fields initialized by codec_parse_uri_config() */
@@ -59,6 +61,21 @@ Codec *codec_dup(Codec *src, Btree *pBt)
         codec->kdf = src->kdf;
     }
     return codec;
+}
+
+void codec_free(void *pcodec)
+{
+    if (pcodec) {
+        int i;
+        volatile char *p;
+        Codec *codec = pcodec;
+        if ((p = codec->pagebuf)) {
+            for (i = 0; i < codec->pagesize; p[i++] = '\0');
+            sqlite3_free(codec->pagebuf);
+        }
+        for (i = 0, p = pcodec; i < sizeof(Codec); p[i++] = '\0');
+        sqlite3_free(codec);
+    }
 }
 
 static int codec_uri_parameter(const char *zUri, const char *parameter,
@@ -132,30 +149,35 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
 {
     int rc, pagesize;
     const char *param, *zUri = sqlite3BtreeGetFilename(pBt);
-
     memset(codec->key, 0, sizeof(codec->key));
     memset(codec->saltbuf, 0, sizeof(codec->saltbuf));
     memset(codec->headerbuf, 0, sizeof(codec->headerbuf));
     codec->salt = codec->header = NULL;
 
     /* Override page_size PRAGMA */
-    pagesize = sqlite3_uri_int64(zUri, "pagesize", 0);
+    pagesize = sqlite3BtreeGetPageSize(pBt);
+    pagesize = sqlite3_uri_int64(zUri, "pagesize", pagesize);
     pagesize = sqlite3_uri_int64(zUri, "page_size", pagesize);
     if (pagesize && pagesize != codec->pagesize) {
         void *pagebuf;
         if (pagesize < 512 || pagesize > 65536 || (pagesize & (pagesize-1)))
             return SQLITE_MISUSE;
 
-        if ((pagebuf = sqlite3_realloc(codec->pagebuf, pagesize))) {
-            rc = sqlite3BtreeSetPageSize(pBt, codec->pagesize, -1, 0);
-            if (rc == SQLITE_OK) {
-                codec->pagebuf = pagebuf;
-                codec->pagesize = pagesize;
-            } else {
-                sqlite3_free(pagebuf);
-            }
-        } else {
+        if (!(pagebuf = sqlite3_malloc(pagesize)))
             return SQLITE_NOMEM;
+
+        if ((rc = sqlite3BtreeSetPageSize(pBt, pagesize, -1, 0)) != SQLITE_OK) {
+            sqlite3_free(pagebuf);
+            return rc;
+        } else {
+            int i;
+            volatile char *p;
+            i = (pagesize < codec->pagesize) ? pagesize : codec->pagesize;
+            memcpy(pagebuf, codec->pagebuf, i);
+            for (i = 0, p = codec->pagebuf; i < codec->pagesize; p[i++] = '\0');
+            sqlite3_free(codec->pagebuf);
+            codec->pagebuf = pagebuf;
+            codec->pagesize = pagesize;
         }
     }
 
@@ -180,7 +202,7 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
         return rc;
     }
 
-    /* Arbitrary file header of length 0..16 */
+    /* File header of length 0..16 */
     rc = codec_uri_parameter(zUri, "header", 0, sizeof(codec->headerbuf),
                              codec->headerbuf);
     if (rc == SQLITE_OK) {
@@ -203,8 +225,6 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
             if (codec->skip < 16)
                 chacha20_rng(&codec->headerbuf[codec->skip], 16 - codec->skip);
             codec->header = codec->headerbuf;
-        } else {
-            codec->header = NULL;
         }
         rc = SQLITE_OK;
     }
@@ -212,36 +232,26 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
     return rc;
 }
 
-
 void codec_kdf(Codec *codec)
 {
-    if (codec->zKey) {
-        if (codec->kdf == KDF_NONE) {
-            memcpy(codec->key, codec->zKey, sizeof(codec->key));
-        } else /*if (codec->kdf == KDF_PBKDF2_HMAC_SHA256)*/ {
-            pbkdf2_hmac_sha256(codec->zKey, codec->nKey,
-                               codec->salt, sizeof(codec->saltbuf),
-                               12345,
-                               codec->key, sizeof(codec->key));
-        }
-        codec->zKey = NULL;
-        codec->nKey = 0;
+    if (!codec->salt) {
+        chacha20_rng(codec->saltbuf, sizeof(codec->saltbuf));
+        codec->salt = codec->saltbuf;
     }
-}
+    if (!codec->header)
+        codec->header = codec->salt;
 
-void codec_free(void *pcodec)
-{
-    if (pcodec) {
-        int i;
-        volatile char *p;
-        Codec *codec = pcodec;
-        if ((p = codec->pagebuf)) {
-            for (i = 0; i < codec->pagesize; p[i++] = '\0');
-            sqlite3_free(codec->pagebuf);
-        }
-        for (i = 0, p = pcodec; i < sizeof(Codec); p[i++] = '\0');
-        sqlite3_free(codec);
+    if (codec->kdf == KDF_PBKDF2_HMAC_SHA256) {
+        pbkdf2_hmac_sha256(codec->zKey, codec->nKey,
+                           codec->salt, sizeof(codec->saltbuf),
+                           12345,
+                           codec->key, sizeof(codec->key));
+    } else /*if (codec->kdf == KDF_NONE)*/ {
+        memcpy(codec->key, codec->zKey, sizeof(codec->key));
     }
+
+    codec->zKey = NULL;
+    codec->nKey = 0;
 }
 
 /*
@@ -282,11 +292,9 @@ void codec_free(void *pcodec)
  * - The tag is a Poly1305 MAC calculated over the encrypted data and the nonce
  *   with the one-time key generated from the master key and the nonce.
  */
-
 #define PAGE_NONCE_LEN 16
 #define PAGE_TAG_LEN 16
 #define PAGE_RESERVED_LEN (PAGE_NONCE_LEN + PAGE_TAG_LEN)
-
 void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
 {
     uint32_t counter;
@@ -316,8 +324,10 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
 
             /* Verify the MAC */
             poly1305(data, n + PAGE_NONCE_LEN, otk, tag);
-            if (poly1305_tagcmp(data + n + PAGE_NONCE_LEN, tag) != 0)
+            if (poly1305_tagcmp(data + n + PAGE_NONCE_LEN, tag) != 0) {
+                reader->error = SQLITE_AUTH;
                 return NULL;
+            }
 
             /* Decrypt */
             chacha20_xor(data + skip, n - skip, otk+32, data + n, counter+1);
@@ -342,13 +352,7 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
 
             /* Encrypt and authenticate */
             chacha20_xor(data + skip, n - skip, otk+32, data + n, counter+1);
-            if (page == 1) {
-                if (!writer->header) {
-                    memcpy(writer->headerbuf, writer->salt, 16);
-                    writer->header = writer->headerbuf;
-                }
-                memcpy(data, writer->header, 16);
-            }
+            if (page == 1) memcpy(data, writer->header, 16);
             poly1305(data, n + PAGE_NONCE_LEN, otk, data + n + PAGE_NONCE_LEN);
         }
         break;
@@ -357,18 +361,19 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
     return data;
 }
 
-/* Reads page1 to trigger codec_kdf and verify the encryption key */
-static int codec_verify_page1(Codec *codec, Btree *pBt)
+/* Verify encryption key by reading page1 (and triggering KDF) */
+static int verify_page1(Pager *pager)
 {
-    int count, rc = SQLITE_OK;
-    Pager *pager = sqlite3BtreePager(pBt);
+    int rc, count;
     sqlite3PagerSharedLock(pager);
     sqlite3PagerPagecount(pager, &count);
     if (count > 0) {
+        /* Non-empty database, read page1 */
         DbPage *page;
-        rc = SQLITE_NOTADB;
         sqlite3PcacheTruncate(pager->pPCache, 0);
-        if (sqlite3PagerGet(pager, 1, &page, 0) == SQLITE_OK) {
+        if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK) {
+            /* Validate the read database header */
+            rc = SQLITE_NOTADB;
             if (!memcmp(page->pData, "SQLite format 3", 16)) {
                 unsigned char *data = page->pData;
                 int pagesize = (data[16] << 8) | data[17];
@@ -379,48 +384,48 @@ static int codec_verify_page1(Codec *codec, Btree *pBt)
             }
             sqlite3PagerUnref(page);
         } else {
+            Codec *codec = sqlite3PagerGetCodec(pager);
+            if (codec && codec->error != SQLITE_OK)
+                rc = codec->error;
             sqlite3PagerSetCodec(pager, NULL, NULL, NULL, NULL);
         }
-    } else if (codec && codec->zKey) {
-        /* Derive an encryption key for an empty database */
-        if (!codec->salt) {
-            chacha20_rng(codec->saltbuf, sizeof(codec->saltbuf));
-            codec->salt = codec->saltbuf;
+    } else {
+        /* Empty database */
+        Codec *codec = sqlite3PagerGetCodec(pager);
+        if (codec && codec->zKey) {
+            /* Derive a new key */
+            codec_kdf(codec);
         }
-        codec_kdf(codec);
+        rc = SQLITE_OK;
     }
     pager_unlock(pager);
     return rc;
 }
 
 /*
- * Set (or unset) a codec for the pager of the specified Btree.
- *
- * The caller must hold the database mutex when calling this function.
- * Note that the function consumes the passed-in codec structure.
+ * Set (or unset) a codec for a Btree pager.
+ * The passed in codec is consumed by the function.
  */
 static int codec_set_to(Codec *codec, Btree *pBt)
 {
     Pager *pager = sqlite3BtreePager(pBt);
+    if (codec) {
+        /* Force secure delete */
+        sqlite3BtreeSecureDelete(pBt, 1);
 
-    if (!codec) {
+        /* Adjust the page size and the reserved area */
+        if (pager->nReserve != PAGE_RESERVED_LEN) {
+            pBt->pBt->btsFlags &= ~BTS_PAGESIZE_FIXED;
+            sqlite3BtreeSetPageSize(pBt, codec->pagesize, PAGE_RESERVED_LEN, 0);
+        }
+
+        /* Set pager codec and try to read page1 */
+        sqlite3PagerSetCodec(pager, codec_handle, NULL, codec_free, codec);
+    } else {
         /* Unset a codec */
         sqlite3PagerSetCodec(pager, NULL, NULL, NULL, NULL);
-        return SQLITE_OK;
     }
-
-    /* Force secure delete */
-    sqlite3BtreeSecureDelete(pBt, 1);
-
-    /* Adjust the page size and the reserved area */
-    if (pager->nReserve != PAGE_RESERVED_LEN) {
-        pBt->pBt->btsFlags &= ~BTS_PAGESIZE_FIXED;
-        sqlite3BtreeSetPageSize(pBt, codec->pagesize, PAGE_RESERVED_LEN, 0);
-    }
-
-    /* Set pager codec and try to read page1 */
-    sqlite3PagerSetCodec(pager, codec_handle, NULL, codec_free, codec);
-    return codec_verify_page1(codec, pBt);
+    return verify_page1(pager);
 }
 
 void sqlite3CodecGetKey(sqlite3 *db, int nDb, void **zKey, int *nKey)
@@ -444,8 +449,7 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *zKey, int nKey)
     sqlite3_mutex_enter(db->mutex);
     if (!nKey) {
         /* Attach with an empty key (no encryption) */
-        codec_set_to(NULL, pBt);
-        rc = codec_verify_page1(NULL, pBt);
+        rc = codec_set_to(NULL, pBt);
     } else if (zKey) {
         /* Attach with the provided key */
         if ((codec = codec_new(zKey, nKey, pBt))) {
@@ -469,7 +473,6 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *zKey, int nKey)
         }
     }
     sqlite3_mutex_leave(db->mutex);
-
     return rc;
 }
 
@@ -506,7 +509,6 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
     if (!db || (!nKey && !zKey))
         return SQLITE_ERROR;
 
-    rc = SQLITE_ERROR;
     sqlite3_mutex_enter(db->mutex);
     if ((pBt = db->aDb[(nDb = db_index_of(db, zDbName))].pBt)) {
         Pgno pgno;
@@ -526,24 +528,21 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
                     reader->writer = reader->reader;
                 }
             } else {
-                rc = codec_verify_page1(NULL, pBt);
+                rc = verify_page1(pager);
             }
             goto leave;
         }
 
         /* Create a codec for the new key */
-        rc = SQLITE_NOMEM;
         if ((codec = codec_new(zKey, nKey, pBt))) {
             if ((rc = codec_parse_uri_config(codec, pBt)) == SQLITE_OK) {
-                if (!codec->salt) {
-                    chacha20_rng(codec->saltbuf, sizeof(codec->saltbuf));
-                    codec->salt = codec->saltbuf;
-                }
                 codec_kdf(codec);
+            } else {
+                codec_free(codec);
+                goto leave;
             }
-        }
-        if (rc != SQLITE_OK) {
-            codec_free(codec);
+        } else {
+            rc = SQLITE_NOMEM;
             goto leave;
         }
 
@@ -555,7 +554,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
                 if (rc == SQLITE_OK) {
                     codec->reader = codec->writer;
                 } else {
-                    codec_set_to(NULL, pBt);
+                    sqlite3PagerSetCodec(pager, NULL, NULL, NULL, NULL);
                 }
             }
             goto leave;
@@ -580,6 +579,9 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
             reader->writer = reader;
             sqlite3BtreeRollback(pBt, SQLITE_ABORT_ROLLBACK, 0);
         }
+    } else {
+        /* Btree of the specified database is NULL */
+        rc = SQLITE_INTERNAL;
     }
 
 leave:
