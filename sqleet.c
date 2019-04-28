@@ -38,6 +38,7 @@ Codec *codec_new(const char *zKey, int nKey, Btree *pBt)
             codec->reader = codec->writer = codec;
             codec->flags = 0;
             codec->error = SQLITE_OK;
+            codec->skip = SKIP_HEADER_BYTES;
             codec->zKey = zKey;
             codec->nKey = nKey;
             /* Remaining fields initialized by codec_parse_uri_config() */
@@ -49,10 +50,10 @@ Codec *codec_new(const char *zKey, int nKey, Btree *pBt)
     return codec;
 }
 
-Codec *codec_dup(Codec *src, Btree *pBt)
+Codec *codec_dup(Codec *src, Btree *srcpBt)
 {
     Codec *codec;
-    if ((codec = codec_new(src->zKey, src->nKey, pBt))) {
+    if ((codec = codec_new(src->zKey, src->nKey, srcpBt))) {
         codec->reader = (src->reader == src) ? codec : src->reader;
         codec->writer = (src->writer == src) ? codec : src->writer;
         memcpy(codec->key, src->key, sizeof(codec->key));
@@ -153,8 +154,7 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
     const char *param, *zUri = sqlite3BtreeGetFilename(pBt);
 
     /* Override page_size PRAGMA */
-    pagesize = sqlite3BtreeGetPageSize(pBt);
-    pagesize = sqlite3_uri_int64(zUri, "pagesize", pagesize);
+    pagesize = sqlite3_uri_int64(zUri, "pagesize", codec->pagesize);
     pagesize = sqlite3_uri_int64(zUri, "page_size", pagesize);
     if (pagesize && pagesize != codec->pagesize) {
         void *pagebuf;
@@ -179,14 +179,16 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
         }
     }
 
-    /* Override compile-time SKIP_HEADER_BYTES setting */
-    codec->skip = sqlite3_uri_int64(zUri, "skip", SKIP_HEADER_BYTES);
+    /* Override SKIP_HEADER_BYTES setting */
+    codec->skip = sqlite3_uri_int64(zUri, "skip", codec->skip);
 
     /* Override key derivation function (KDF) */
     if ((param = sqlite3_uri_parameter(zUri, "kdf"))) {
-        if (strcmp(param, "none") != 0 || codec->nKey != sizeof(codec->key))
+        if (!strcmp(param, "none") && codec->nKey == sizeof(codec->key)) {
+            codec->kdf = SQLEET_KDF_NONE;
+        } else {
             return SQLITE_MISUSE;
-        codec->kdf = SQLEET_KDF_NONE;
+        }
     } else {
         codec->kdf = SQLEET_KDF_PBKDF2_HMAC_SHA256;
     }
@@ -194,8 +196,15 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
     /* KDF salt of length 0..16 */
     rc = codec_uri_parameter(zUri, "salt", 0, sizeof(codec->salt), codec->salt);
     if (rc == SQLITE_OK) {
-        codec->flags |= SQLEET_HAS_SALT;
-    } else if (rc != SQLITE_NOTFOUND) {
+        if (codec->kdf != SQLEET_KDF_NONE) {
+            codec->flags |= SQLEET_HAS_SALT;
+        } else {
+            return SQLITE_MISUSE;
+        }
+    } else if (rc == SQLITE_NOTFOUND) {
+        if (codec->kdf == SQLEET_KDF_NONE || !(codec->flags & SQLEET_HAS_SALT))
+            chacha20_rng(codec->salt, sizeof(codec->salt));
+    } else {
         return rc;
     }
 
@@ -209,6 +218,8 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
             /* Salt required in addition to header when using KDF */
             rc = SQLITE_MISUSE;
         }
+    } else if (rc == SQLITE_NOTFOUND && (codec->flags == SQLEET_HAS_HEADER)) {
+        rc = SQLITE_OK;
     } else if (rc == SQLITE_NOTFOUND) {
         if (codec->kdf == SQLEET_KDF_NONE) {
             /*
@@ -221,7 +232,8 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
             }
             if (codec->skip < 16)
                 chacha20_rng(&codec->header[codec->skip], 16 - codec->skip);
-            codec->flags |= SQLEET_HAS_HEADER;
+        } else {
+            memcpy(codec->header, codec->salt, sizeof(codec->header));
         }
         rc = SQLITE_OK;
     }
@@ -231,13 +243,6 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
 
 void codec_kdf(Codec *codec)
 {
-    if (!(codec->flags & SQLEET_HAS_SALT)) {
-        chacha20_rng(codec->salt, sizeof(codec->salt));
-        codec->flags |= SQLEET_HAS_SALT;
-    }
-    if (!(codec->flags & SQLEET_HAS_HEADER))
-        memcpy(codec->header, codec->salt, sizeof(codec->header));
-
     if (codec->kdf == SQLEET_KDF_PBKDF2_HMAC_SHA256) {
         pbkdf2_hmac_sha256(codec->zKey, codec->nKey,
                            codec->salt, sizeof(codec->salt),
@@ -308,10 +313,10 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
             const int n = reader->pagesize - PAGE_RESERVED_LEN;
             const int skip = (page == 1) ? reader->skip : 0;
             if (page == 1 && !(reader->flags & SQLEET_HAS_KEY)) {
-                if (!(reader->flags & SQLEET_HAS_SALT)) {
+                if (!(reader->flags & SQLEET_HAS_SALT))
                     memcpy(reader->salt, data, 16);
-                    reader->flags |= SQLEET_HAS_SALT;
-                }
+                if (!(reader->flags & SQLEET_HAS_HEADER))
+                    memcpy(reader->header, reader->salt, 16);
                 codec_kdf(reader);
             }
 
@@ -462,12 +467,22 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *zKey, int nKey)
             rc = SQLITE_NOMEM;
         }
     } else if (nDb != 0) {
-        /* Use the main database's codec */
-        codec = sqlite3PagerGetCodec(sqlite3BtreePager(db->aDb[0].pBt));
-        if (codec && (codec = codec_dup(codec, pBt))) {
-            rc = codec_set_to(codec, pBt);
+        /* Use the main database's codec (no key given) */
+        const char *zUri = sqlite3BtreeGetFilename(pBt);
+        if (codec_uri_parameter(zUri, "salt", 0, 0, NULL) == SQLITE_NOTFOUND) {
+            Codec *dup;
+            codec = sqlite3PagerGetCodec(sqlite3BtreePager(db->aDb[0].pBt));
+            if (codec && (dup = codec_dup(codec, db->aDb[0].pBt))) {
+                if ((rc = codec_parse_uri_config(dup, pBt)) == SQLITE_OK) {
+                    rc = codec_set_to(dup, pBt);
+                } else {
+                    codec_free(dup);
+                }
+            } else {
+                rc = SQLITE_NOMEM;
+            }
         } else {
-            rc = SQLITE_CANTOPEN;
+            rc = SQLITE_MISUSE;
         }
     }
     sqlite3_mutex_leave(db->mutex);
