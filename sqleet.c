@@ -8,16 +8,25 @@
  * SQLite3 codec implementation.
  */
 typedef struct codec { 
-    void *pagebuf;
-    int pagesize;
     struct codec *reader, *writer;
-    unsigned char key[32], saltbuf[16], headerbuf[16];
-    unsigned char *salt, *header;
+    unsigned char key[32], salt[16], header[16];
+    enum {
+        SQLEET_HAS_KEY      = 0x01,
+        SQLEET_HAS_SALT     = 0x02,
+        SQLEET_HAS_HEADER   = 0x04
+    } flags;
     int error;
+
     const void *zKey;
     int nKey;
+    void *pagebuf;
+    int pagesize;
     int skip;
-    enum { KDF_NONE = 0, KDF_PBKDF2_HMAC_SHA256 } kdf;
+
+    enum {
+        SQLEET_KDF_NONE = 0,
+        SQLEET_KDF_PBKDF2_HMAC_SHA256
+    } kdf;
 } Codec;
 
 Codec *codec_new(const char *zKey, int nKey, Btree *pBt)
@@ -27,7 +36,7 @@ Codec *codec_new(const char *zKey, int nKey, Btree *pBt)
         codec->pagesize = sqlite3BtreeGetPageSize(pBt);
         if ((codec->pagebuf = sqlite3_malloc(codec->pagesize))) {
             codec->reader = codec->writer = codec;
-            codec->salt = codec->header = NULL;
+            codec->flags = 0;
             codec->error = SQLITE_OK;
             codec->zKey = zKey;
             codec->nKey = nKey;
@@ -46,17 +55,10 @@ Codec *codec_dup(Codec *src, Btree *pBt)
     if ((codec = codec_new(src->zKey, src->nKey, pBt))) {
         codec->reader = (src->reader == src) ? codec : src->reader;
         codec->writer = (src->writer == src) ? codec : src->writer;
-
         memcpy(codec->key, src->key, sizeof(codec->key));
-        if (src->salt) {
-            memcpy(codec->saltbuf, src->salt, sizeof(codec->saltbuf));
-            codec->salt = codec->saltbuf;
-        }
-        if (src->header) {
-            memcpy(codec->headerbuf, src->header, sizeof(codec->headerbuf));
-            codec->header = codec->headerbuf;
-        }
-
+        memcpy(codec->salt, src->salt, sizeof(codec->salt));
+        memcpy(codec->header, src->header, sizeof(codec->header));
+        codec->flags = src->flags;
         codec->skip = src->skip;
         codec->kdf = src->kdf;
     }
@@ -149,10 +151,6 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
 {
     int rc, pagesize;
     const char *param, *zUri = sqlite3BtreeGetFilename(pBt);
-    memset(codec->key, 0, sizeof(codec->key));
-    memset(codec->saltbuf, 0, sizeof(codec->saltbuf));
-    memset(codec->headerbuf, 0, sizeof(codec->headerbuf));
-    codec->salt = codec->header = NULL;
 
     /* Override page_size PRAGMA */
     pagesize = sqlite3BtreeGetPageSize(pBt);
@@ -188,43 +186,42 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
     if ((param = sqlite3_uri_parameter(zUri, "kdf"))) {
         if (strcmp(param, "none") != 0 || codec->nKey != sizeof(codec->key))
             return SQLITE_MISUSE;
-        codec->kdf = KDF_NONE;
+        codec->kdf = SQLEET_KDF_NONE;
     } else {
-        codec->kdf = KDF_PBKDF2_HMAC_SHA256;
+        codec->kdf = SQLEET_KDF_PBKDF2_HMAC_SHA256;
     }
 
     /* KDF salt of length 0..16 */
-    rc = codec_uri_parameter(zUri, "salt", 0, sizeof(codec->saltbuf),
-                            codec->saltbuf);
+    rc = codec_uri_parameter(zUri, "salt", 0, sizeof(codec->salt), codec->salt);
     if (rc == SQLITE_OK) {
-        codec->salt = codec->saltbuf;
+        codec->flags |= SQLEET_HAS_SALT;
     } else if (rc != SQLITE_NOTFOUND) {
         return rc;
     }
 
     /* File header of length 0..16 */
-    rc = codec_uri_parameter(zUri, "header", 0, sizeof(codec->headerbuf),
-                             codec->headerbuf);
+    rc = codec_uri_parameter(zUri, "header", 0, sizeof(codec->header),
+                             codec->header);
     if (rc == SQLITE_OK) {
-        if (codec->salt || codec->kdf == KDF_NONE) {
-            codec->header = codec->headerbuf;
+        if ((codec->flags & SQLEET_HAS_SALT) || codec->kdf == SQLEET_KDF_NONE) {
+            codec->flags |= SQLEET_HAS_HEADER;
         } else {
             /* Salt required in addition to header when using KDF */
             rc = SQLITE_MISUSE;
         }
     } else if (rc == SQLITE_NOTFOUND) {
-        if (codec->kdf == KDF_NONE) {
+        if (codec->kdf == SQLEET_KDF_NONE) {
             /*
-             * Salt is optional when KDF is disabled. In this case, the skipping
+             * Salt is ignored when KDF is disabled. In this case, the skipping
              * of the header encryption is also applied to SQLite3 magic string.
              */
             if (codec->skip) {
-                memcpy(codec->headerbuf, "SQLite format 3",
+                memcpy(codec->header, "SQLite format 3",
                        (codec->skip < 16) ? codec->skip : 16);
             }
             if (codec->skip < 16)
-                chacha20_rng(&codec->headerbuf[codec->skip], 16 - codec->skip);
-            codec->header = codec->headerbuf;
+                chacha20_rng(&codec->header[codec->skip], 16 - codec->skip);
+            codec->flags |= SQLEET_HAS_HEADER;
         }
         rc = SQLITE_OK;
     }
@@ -234,22 +231,23 @@ int codec_parse_uri_config(Codec *codec, Btree *pBt)
 
 void codec_kdf(Codec *codec)
 {
-    if (!codec->salt) {
-        chacha20_rng(codec->saltbuf, sizeof(codec->saltbuf));
-        codec->salt = codec->saltbuf;
+    if (!(codec->flags & SQLEET_HAS_SALT)) {
+        chacha20_rng(codec->salt, sizeof(codec->salt));
+        codec->flags |= SQLEET_HAS_SALT;
     }
-    if (!codec->header)
-        codec->header = codec->salt;
+    if (!(codec->flags & SQLEET_HAS_HEADER))
+        memcpy(codec->header, codec->salt, sizeof(codec->header));
 
-    if (codec->kdf == KDF_PBKDF2_HMAC_SHA256) {
+    if (codec->kdf == SQLEET_KDF_PBKDF2_HMAC_SHA256) {
         pbkdf2_hmac_sha256(codec->zKey, codec->nKey,
-                           codec->salt, sizeof(codec->saltbuf),
+                           codec->salt, sizeof(codec->salt),
                            12345,
                            codec->key, sizeof(codec->key));
-    } else /*if (codec->kdf == KDF_NONE)*/ {
+    } else /*if (codec->kdf == SQLEET_KDF_NONE)*/ {
         memcpy(codec->key, codec->zKey, sizeof(codec->key));
     }
 
+    codec->flags |= SQLEET_HAS_KEY;
     codec->zKey = NULL;
     codec->nKey = 0;
 }
@@ -309,10 +307,10 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
         if (reader) {
             const int n = reader->pagesize - PAGE_RESERVED_LEN;
             const int skip = (page == 1) ? reader->skip : 0;
-            if (page == 1 && reader->zKey) {
-                if (!reader->salt) {
-                    memcpy(reader->saltbuf, data, 16);
-                    reader->salt = reader->saltbuf;
+            if (page == 1 && !(reader->flags & SQLEET_HAS_KEY)) {
+                if (!(reader->flags & SQLEET_HAS_SALT)) {
+                    memcpy(reader->salt, data, 16);
+                    reader->flags |= SQLEET_HAS_SALT;
                 }
                 codec_kdf(reader);
             }
@@ -392,7 +390,7 @@ static int verify_page1(Pager *pager)
     } else {
         /* Empty database */
         Codec *codec = sqlite3PagerGetCodec(pager);
-        if (codec && codec->zKey) {
+        if (codec && !(codec->flags & SQLEET_HAS_KEY)) {
             /* Derive a new key */
             codec_kdf(codec);
         }
@@ -454,7 +452,7 @@ int sqlite3CodecAttach(sqlite3 *db, int nDb, const void *zKey, int nKey)
         /* Attach with the provided key */
         if ((codec = codec_new(zKey, nKey, pBt))) {
             if ((rc = codec_parse_uri_config(codec, pBt)) == SQLITE_OK) {
-                if (codec->salt)
+                if (codec->flags & SQLEET_HAS_SALT)
                     codec_kdf(codec);
                 rc = codec_set_to(codec, pBt);
             } else {
