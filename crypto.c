@@ -280,7 +280,7 @@ static void sha256_block(uint32_t state[8], const unsigned char p[64])
     };
 
     a = state[0]; b = state[1]; c = state[2]; d = state[3];
-    e = state[4]; f = state[5]; g = state[6]; h = state[7]; 
+    e = state[4]; f = state[5]; g = state[6]; h = state[7];
 
     #define ROUND_CORE(i)                                           \
     S1 = ROR32(e, 6) ^ ROR32(e, 11) ^ ROR32(e, 25);                 \
@@ -455,7 +455,16 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
 /*
  * Platform-specific entropy functions for seeding RNG
  */
-#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__CYGWIN__)
+#include <windows.h>
+#define RtlGenRandom SystemFunction036
+BOOLEAN NTAPI RtlGenRandom(PVOID RandomBuffer, ULONG RandomBufferLength);
+#pragma comment(lib, "advapi32.lib")
+static size_t entropy(void *buf, size_t n)
+{
+    return RtlGenRandom(buf, n) ? n : 0;
+}
+#elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -537,19 +546,6 @@ static size_t entropy(void *buf, size_t n)
     #endif
     return read_urandom(buf, n);
 }
-
-#elif defined(_WIN32)
-
-#include <windows.h>
-#define RtlGenRandom SystemFunction036
-BOOLEAN NTAPI RtlGenRandom(PVOID RandomBuffer, ULONG RandomBufferLength);
-#pragma comment(lib, "advapi32.lib")
-
-static size_t entropy(void *buf, size_t n)
-{
-    return RtlGenRandom(buf, n) ? n : 0;
-}
-
 #else
 #error "Secure pseudorandom number generator unimplemented for this OS"
 #endif
@@ -562,7 +558,7 @@ void chacha20_rng(void *out, size_t n)
     static size_t available = 0;
     static uint32_t counter = UINT32_MAX;
     static unsigned char key[32], nonce[12], buffer[64] = {0};
-    
+
 #if SQLITE_THREADSAFE
     sqlite3_mutex *mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_PRNG);
     sqlite3_mutex_enter(mutex);
