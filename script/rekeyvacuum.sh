@@ -2,7 +2,7 @@
 # Generate rekeyvacuum.c from an SQLite3 amalgamation and write it to stdout.
 # Usage: ./script/rekeyvacuum.sh sqlite3.c >rekeyvacuum.c
 
-INPUT="$([ "$#" -eq 1 ] && echo "$1" || echo "sqlite3.c")"
+INPUT="$([ "$#" -eq "1" ] && echo "$1" || echo "sqlite3.c")"
 if ! [ -f "$INPUT" ]; then
   echo "Usage: $0 <SQLITE3_AMALGAMATION>" >&2
   echo " e.g.: $0 sqlite3.c" >&2

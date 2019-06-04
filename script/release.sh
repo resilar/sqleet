@@ -4,7 +4,7 @@
 set -e
 
 die() {
-    [ ! -z "$RELEASE" ] && rm -rf "$RELEASE_DIR" "$RELEASE.zip" "$RELEASE.tar.gz"
+    [ -n "$RELEASE" ] && rm -rf "$RELEASE_DIR" "$RELEASE.zip" "$RELEASE.tar.gz"
     [ "$#" -ne 0 ] && echo "[-] Error:" "$@" >&2
     exit 1
 }
