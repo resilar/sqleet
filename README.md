@@ -7,7 +7,7 @@
 - [Library API](#library-api)
   - [C programming interface](#c-programming-interface)
   - [URI configuration interface](#uri-configuration-interface)
-- [Android/iOS support](#android-ios-support)
+- [Android/iOS support](#androidios-support)
 - [Versioning scheme](#versioning-scheme)
 - [License](#license)
 
