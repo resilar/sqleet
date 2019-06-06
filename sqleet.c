@@ -419,10 +419,16 @@ static void size_hook(void *pcodec, int new_pagesize, int reserved)
     Codec *codec = (Codec *)pcodec;
     if (codec && codec->pagesize != new_pagesize) {
         u32 pagesize = codec->pagesize;
-        Pager *pager = sqlite3BtreePager(codec->btree);
-        if (sqlite3PagerSetPagesize(pager, &pagesize, reserved) == SQLITE_OK) {
-            if (pagesize == codec->pagesize)
-                codec->btree->pBt->pageSize = pagesize;
+        const int expected = (codec->writer ? PAGE_RESERVED_LEN : 0);
+        if (expected <= reserved) {
+            Pager *pager = sqlite3BtreePager(codec->btree);
+            if (sqlite3PagerSetPagesize(pager, &pagesize, -1) == SQLITE_OK) {
+                if (pagesize == codec->pagesize)
+                    codec->btree->pBt->pageSize = pagesize;
+            }
+        } else {
+            codec->reader = codec->writer = NULL;
+            codec->error = SQLITE_MISUSE;
         }
     }
 }
@@ -450,6 +456,7 @@ static int codec_set_to(Codec *codec, Btree *pBt)
 
         /* Set pager codec and try to read page1 */
         codec->btree = pBt;
+        codec->error = SQLITE_OK;
         sqlite3PagerSetCodec(pager, codec_handle, size_hook, codec_free, codec);
     } else {
         /* Unset a codec */
