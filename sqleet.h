@@ -6,6 +6,8 @@
  * Value 0 produces encrypted databases that are indistinguishable from random.
  * Use 24 for compatibility with the SQLite3 Encryption Extension (SEE) so that
  * database settings (e.g., page size) can be read from an encrypted database.
+ * Alternatively, 'skip' and 'page_size' URI parameters can be used at run-time
+ * to specify the number of unencrypted bytes as well as the database page size.
  */
 #ifndef SKIP_HEADER_BYTES
 #define SKIP_HEADER_BYTES 0
@@ -31,6 +33,7 @@
 #define SQLITE_TEMP_STORE 2
 #endif
 
+/* Omit "sqlite3.h" when including this header from "sqlite3.c" */
 #ifndef SQLITE3_H_OMIT
 #include "sqlite3.h"
 #endif
