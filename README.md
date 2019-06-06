@@ -2,8 +2,8 @@
 [SQLite3](https://www.sqlite.org/).
 
 - [Compiling](#compiling)
-- [Example](#example)
 - [Cryptography buzzwords](#cryptography-buzzwords)
+- [Example](#example)
 - [Library API](#library-api)
   - [C programming interface](#c-programming-interface)
   - [URI configuration interface](#uri-configuration-interface)
@@ -43,6 +43,17 @@ to create an amalgamation of SQLite3 with sqleet encryption support. Similarly,
 run
 `./script/amalgamate.sh <sqleet.h >release.h`
 to amalgamate the header.
+
+
+Cryptography buzzwords
+----------------------
+
+- PBKDF2-HMAC-SHA256 key derivation with a 16-byte salt and 12345 iterations.
+- ChaCha20 stream cipher with one-time keys.
+- Poly1305 authentication tags.
+
+A low-level description of the database encryption scheme is available in
+[sqleet.c:260](sqleet.c#L260).
 
 
 Example
@@ -111,7 +122,8 @@ file. Thus, it is the user's responsibility to guarantee that the settings are
 initialized properly before accessing the database. Most importantly, if the
 database page size differs from the default 4096, then opening the database
 will fail regardless of correct key unless the user explicitly sets `page_size`
-to the proper value using `PRAGMA` command or URI API.
+to the proper value using `PRAGMA` command or [URI
+API](#uri-configuration-interface).
 
 In contrast, the official [SQLite Encryption Extension
 (SEE)](https://www.sqlite.org/see) leaves bytes 16..23 of the database header
@@ -120,18 +132,8 @@ from encrypted databases - with the obvious cost of making database files
 distinguishable from random. sqleet can optionally be compiled with
 `-DSKIP_HEADER_BYTES=24` flag to get the same default behavior (bytes 0..15
 contain the KDF salt so only the bytes 16..23 are actually skipped). URI
-parameter `skip=n` overrides the value of `SKIP_HEADER_BYTES` with `n`.
-
-
-Cryptography buzzwords
-----------------------
-
-- PBKDF2-HMAC-SHA256 key derivation with a 16-byte salt and 12345 iterations.
-- ChaCha20 stream cipher with one-time keys.
-- Poly1305 authentication tags.
-
-A low-level description of the database encryption scheme is available in
-[sqleet.c:258](sqleet.c#L258).
+parameter `skip=n` overrides the compile-time value of `SKIP_HEADER_BYTES` with
+`n`.
 
 
 Library API
@@ -149,8 +151,8 @@ encryption API, i.e., C functions `sqlite3_key()` and `sqlite3_rekey()` for
 managing database encryption keys. These functions can be called directly from
 C code, while other programming languages need to call the C functions via
 [FFI](https://en.wikipedia.org/wiki/Foreign_function_interface) mechanism.
-Another way to invoke the functions is with PRAGMAs `key` and `rekey` (see
-[Example](#example)).
+Another way to invoke the functions is with `PRAGMA key` and `PRAGMA rekey`
+commands (see [Example](#example)).
 
 ```c
 SQLITE_API int sqlite3_key(      /* Invoked by PRAGMA key='x' */
@@ -181,7 +183,7 @@ with a new key is performed directly by processing each page sequentially.
 Return value is `SQLITE_OK` on success and an SQLite3 error code on failure.
 
 In addition, there are `sqlite3_key_v2()` and `sqlite3_rekey_v2()` functions
-accepting name of the target database as the second parameter.
+that accept name of the target database as the second parameter.
 
 
 ### URI configuration interface
@@ -206,19 +208,28 @@ Hex-prefixed versions accepting a hex input string are available for parameters
 `key`, `salt` and `header`.
 
 Parameters `salt` and `header` expect 16-byte strings as inputs (shorter
-strings are zero-padded to 16 bytes). The KDF salt is stored in the first 16
-bytes of the database file if `header` is undefined. Otherwise the value of
-`header` overwrites the first 16 bytes, effectively hiding the KDF salt from
-the database file.
+strings are zero-padded to 16 bytes). The `header` string is stored in the
+first 16 bytes of the database file (`header` defaults to `salt` value if
+undefined). If `kdf=none`, then the default PBKDF2-HMAC-SHA256 is disabled and
+`key` accepts accepts a 32-byte string that becomes the *master* encryption key
+which is normally derived from the key by the KDF. This ultimately allows the
+user of the library to take full control of the key derivation process.
 
-When the default PBKDF2-HMAC-SHA256 KDF is disabled with `kdf=none`, URI
-parameter `key` (and PRAGMAs `key` and `rekey`) accepts a 32-byte string that
-becomes the *master* encryption key which is normally derived by the KDF from
-the given key. This allows the users of the library to take full control of the
-key derivation process if needed.
+Parameters `skip` and `page_size` override compile-time `SKIP_HEADER_BYTES`
+value and `PRAGMA page_size` value, respectively.
 
-Erroneus parameters (e.g., unsupported input length or otherwise bad input)
-cause the opening of the database to fail with a non-zero SQLite3 error code.
+Changing URI settings of an existing database can be accomplished with `VACUUM
+INTO` (introduced in SQLite 3.27.0) by giving new URI parameter values in the
+`INTO` filename. For example, `VACUUM INTO 'file:skipped.db?skip=24'` vacuums
+the current main database to file `skipped.db` with `skip` set to 24. Other URI
+settings, including the encryption key, are inherited from the main database
+(unless `key` parameter is specified, in which case default values are used for
+any unspecified parameters). However, `page_size` of an existing database
+cannot be currently changed due to limitations in SQLite3 code.
+
+Erroneus parameters (e.g., unsupported value or otherwise bad input) cause the
+opening (or vacuuming) of the database to fail with a non-zero SQLite3 error
+code.
 
 
 Android/iOS support
@@ -237,8 +248,8 @@ Likewise, sqleet does not offer an iOS version either, but compiling a custom
 SQLite3 with sqleet encryption support for iOS is a straightforward task (e.g.,
 compile [switflyfalling/SQLiteLib](https://github.com/swiftlyfalling/SQLiteLib)
 with sqleet release amalgamation instead of the SQLite3 amalgamation).
-Moreover, iOS apps using an *encrypted* WAL-journaled SQLite3 database located
-in a shared data container get terminated when sent to the background (see
+Moreover, iOS apps with an *encrypted* WAL-journaled SQLite3 database in a
+shared data container are terminated when sent to the background (see
 [sqlcipher/sqlcipher#255](https://github.com/sqlcipher/sqlcipher/issues/255),
 [TN2408](https://developer.apple.com/library/archive/technotes/tn2408/_index.html)
 and
@@ -246,12 +257,10 @@ and
 for more information). A common workaround is to leave the first 32 bytes of
 the database file unencrypted so that iOS recognizes the file as a regular
 WAL-journaled SQLite3 database and does not terminate the app. Thus, an
-iOS-compatible sqleet database can be created, for example, with the following
-URI settings:
+iOS-compatible sqleet database can be created with the following URI settings:
 
 ```
-[sqleet]% rm -f secrets.db
-[sqleet]% ./sqleet 'file:secrets.db?key=swordfish&salt=SodiumChloride42&header=SQLite%20format%203&skip=32'
+[sqleet]% ./sqleet 'file:ios.db?key=swordfish&salt=SodiumChloride42&header=SQLite%20format%203&skip=32'
 SQLite version 3.28.0 2019-04-16 19:49:53
 Enter ".help" for usage hints.
 sqlite> CREATE TABLE f(x,y);
@@ -278,9 +287,9 @@ compatible across different SQLite3 versions without any changes to the source
 code.
 
 As a corollary, sqleet releases are published whenever a new SQLite3 version is
-released. A new sqleet release can thus include only an updated version of
-SQLite3 and no added features or bug fixes if sqleet master branch has not
-changed since the last release. [Releases
+released. A new sqleet release thus does not necessarily include bug fixes or
+new features (except updated SQLite3 version) if there has been no commits to
+sqleet master branch since the previous SQLite3 release. [Releases
 page](https://github.com/resilar/sqleet/releases) contains a changelog for each
 sqleet release version.
 
