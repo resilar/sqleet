@@ -14,7 +14,9 @@ typedef struct codec {
         SQLEET_HAS_KEY      = 0x01,
         SQLEET_HAS_SALT     = 0x02,
         SQLEET_HAS_HEADER   = 0x04,
-        SQLEET_HAS_PAGESIZE = 0x08
+        SQLEET_HAS_PAGESIZE = 0x08,
+        SQLEET_HAS_SKIP     = 0x10,
+        SQLEET_HAS_KDF      = 0x20
     } flags;
     int error;
 
@@ -46,7 +48,6 @@ Codec *codec_new(const char *zKey, int nKey, Codec *from)
         } else {
             codec->reader = codec->writer = codec;
             codec->flags = 0;
-            codec->skip = SKIP_HEADER_BYTES;
         }
         codec->zKey = zKey;
         codec->nKey = nKey;
@@ -142,7 +143,7 @@ static int codec_uri_parameter(const char *zUri, const char *parameter,
 int codec_parse_uri_config(Codec *codec, const char *zUri)
 {
     int rc, pagesize;
-    const char *param;
+    const char *value;
 
     /* Override page_size PRAGMA */
     pagesize = (int)sqlite3_uri_int64(zUri, "page_size", -1);
@@ -154,19 +155,35 @@ int codec_parse_uri_config(Codec *codec, const char *zUri)
         }
         codec->flags |= SQLEET_HAS_PAGESIZE;
     } else if (pagesize == 0) {
+        codec->pagesize = pagesize;
         codec->flags &= ~SQLEET_HAS_PAGESIZE;
     }
 
-    /* Override SKIP_HEADER_BYTES setting */
-    codec->skip = (int)sqlite3_uri_int64(zUri, "skip", codec->skip);
+    /* Override SKIP_HEADER_BYTES */
+    if ((value = sqlite3_uri_parameter(zUri, "skip")) && !*value) {
+        codec->flags &= ~SQLEET_HAS_SKIP;
+        value = NULL;
+    }
+    if (value && (rc = (int)sqlite3_uri_int64(zUri, "skip", -1)) >= 0) {
+        codec->skip = rc;
+        codec->flags |= SQLEET_HAS_SKIP;
+    } else if (!(codec->flags & SQLEET_HAS_SKIP)) {
+        codec->skip = SKIP_HEADER_BYTES;
+    }
     if (codec->skip < 0 || (pagesize > 0 && codec->skip > pagesize))
         return SQLITE_MISUSE;
 
     /* Override key derivation function (KDF) */
-    if (!(param = sqlite3_uri_parameter(zUri, "kdf"))) {
-        codec->kdf = SQLEET_KDF_PBKDF2_HMAC_SHA256;
-    } else if (!strcmp(param, "none") && codec->nKey == sizeof(codec->key)) {
+    if ((value = sqlite3_uri_parameter(zUri, "kdf")) && !*value) {
+        codec->flags &= ~SQLEET_HAS_KDF;
+        value = NULL;
+    }
+    if (!value) {
+        if (!(codec->flags & SQLEET_HAS_KDF))
+            codec->kdf = SQLEET_KDF_PBKDF2_HMAC_SHA256;
+    } else if (!strcmp(value, "none") && codec->nKey == sizeof(codec->key)) {
         codec->kdf = SQLEET_KDF_NONE;
+        codec->flags |= SQLEET_HAS_KDF;
     } else {
         return SQLITE_MISUSE;
     }
@@ -174,12 +191,16 @@ int codec_parse_uri_config(Codec *codec, const char *zUri)
     /* KDF salt */
     rc = codec_uri_parameter(zUri, "salt", 1, sizeof(codec->salt), codec->salt);
     if (rc == SQLITE_OK) {
+        const char *key = sqlite3_uri_parameter(zUri, "key");
+        const char *hexkey = sqlite3_uri_parameter(zUri, "hexkey");
+        if ((!key || !*key) && (!hexkey || !*hexkey))
+            return SQLITE_MISUSE;
         codec->flags |= SQLEET_HAS_SALT;
     } else if (rc == SQLITE_EMPTY) {
         chacha20_rng(codec->salt, sizeof(codec->salt));
         codec->flags &= ~SQLEET_HAS_SALT;
     } else if (rc == SQLITE_NOTFOUND) {
-        if (!(codec->flags & SQLEET_HAS_SALT))
+        if (!(codec->flags & (SQLEET_HAS_KEY|SQLEET_HAS_SALT)))
             chacha20_rng(codec->salt, sizeof(codec->salt));
     } else {
         return rc;
@@ -546,6 +567,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
     /* Create a codec for the new key */
     if ((codec = codec_new(zKey, nKey, reader))) {
         const char *zUri = sqlite3BtreeGetFilename(pBt);
+        codec->flags &= ~SQLEET_HAS_KEY;
         if (!(codec->flags & SQLEET_HAS_PAGESIZE) && db->nextPagesize)
             codec->pagesize = db->nextPagesize;
         if ((rc = codec_parse_uri_config(codec, zUri)) != SQLITE_OK) {
