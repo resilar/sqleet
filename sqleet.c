@@ -552,7 +552,6 @@ int sqlite3_key(sqlite3 *db, const void *zKey, int nKey)
 int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
                      const void *zKey, int nKey)
 {
-    char *err;
     int nDb, rc;
     Btree *pBt;
     Pager *pager;
@@ -573,6 +572,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
     if (!nKey) {
         /* Decrypt */
         if (reader) {
+            char *err = NULL;
             reader->writer = NULL;
             rc = sqlite3RekeyVacuum(&err, db, nDb, NULL, 0);
             if (rc == SQLITE_OK) {
@@ -606,6 +606,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
         /* Encrypt */
         codec->reader = NULL;
         if ((rc = codec_set_to(codec, pBt)) == SQLITE_OK) {
+            char *err = NULL;
             rc = sqlite3RekeyVacuum(&err, db, nDb, NULL, PAGE_RESERVED_LEN);
             if (rc == SQLITE_OK) {
                 codec->reader = codec->writer;
