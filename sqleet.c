@@ -51,6 +51,7 @@ Codec *codec_new(const char *zKey, int nKey, Codec *from)
             codec->reader = codec->writer = codec;
             codec->flags = 0;
         }
+        codec->pagebuf = NULL;
         codec->zKey = zKey;
         codec->nKey = nKey;
     }
