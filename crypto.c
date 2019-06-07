@@ -556,7 +556,7 @@ static size_t entropy(void *buf, size_t n)
 void chacha20_rng(void *out, size_t n)
 {
     static size_t available = 0;
-    static uint32_t counter = UINT32_MAX;
+    static uint32_t counter = 0;
     static unsigned char key[32], nonce[12], buffer[64] = {0};
 
 #if SQLITE_THREADSAFE
@@ -567,13 +567,13 @@ void chacha20_rng(void *out, size_t n)
     while (n > 0) {
         size_t m;
         if (available == 0) {
-            if (counter == UINT32_MAX) {
+            if (counter == 0) {
                 if (entropy(key, sizeof(key)) != sizeof(key))
                     abort();
                 if (entropy(nonce, sizeof(nonce)) != sizeof(nonce))
                     abort();
             }
-            chacha20_xor(buffer, sizeof(buffer), key, nonce, ++counter);
+            chacha20_xor(buffer, sizeof(buffer), key, nonce, counter++);
             available = sizeof(buffer);
         }
         m = (available < n) ? available : n;
