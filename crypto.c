@@ -122,12 +122,11 @@ void chacha20_xor(unsigned char *data, size_t n, const unsigned char key[32],
 void poly1305(const unsigned char *msg, size_t n, const unsigned char key[32],
               unsigned char tag[16])
 {
-    uint32_t hibit, m, w;
+    uint64_t d0, d1, d2, d3, d4;
     uint32_t h0, h1, h2, h3, h4;
     uint32_t r0, r1, r2, r3, r4;
     uint32_t s1, s2, s3, s4;
-    uint64_t f0, f1, f2, f3;
-    uint32_t g0, g1, g2, g3, g4;
+    uint32_t hibit, m, w;
     unsigned char buf[16];
 
     hibit = 1 << 24;
@@ -138,7 +137,6 @@ void poly1305(const unsigned char *msg, size_t n, const unsigned char key[32],
     r3 = (LOAD32_LE(key +  9) >> 6) & 0x03F03FFF; s3 = r3 * 5;
     r4 = (LOAD32_LE(key + 12) >> 8) & 0x000FFFFF; s4 = r4 * 5;
     while (n >= 16) {
-        uint64_t d0, d1, d2, d3, d4;
 process_block:
         h0 += (LOAD32_LE(msg +  0) >> 0) & 0x03FFFFFF;
         h1 += (LOAD32_LE(msg +  3) >> 2) & 0x03FFFFFF;
@@ -154,12 +152,11 @@ process_block:
         d4 = MUL(h0,r4) + MUL(h1,r3) + MUL(h2,r2) + MUL(h3,r1) + MUL(h4,r0);
         #undef MUL
 
-        h0 = d0 & 0x03FFFFFF; d1 += (uint32_t)(d0 >> 26);
-        h1 = d1 & 0x03FFFFFF; d2 += (uint32_t)(d1 >> 26);
-        h2 = d2 & 0x03FFFFFF; d3 += (uint32_t)(d2 >> 26);
-        h3 = d3 & 0x03FFFFFF; d4 += (uint32_t)(d3 >> 26);
+        h0 = d0 & 0x03FFFFFF; d1 += (d0 >> 26);
+        h1 = d1 & 0x03FFFFFF; d2 += (d1 >> 26);
+        h2 = d2 & 0x03FFFFFF; d3 += (d2 >> 26);
+        h3 = d3 & 0x03FFFFFF; d4 += (d3 >> 26);
         h4 = d4 & 0x03FFFFFF; h0 += (uint32_t)(d4 >> 26) * 5;
-        h1 += (h0 >> 26); h0 = h0 & 0x03FFFFFF;
 
         msg += 16;
         n -= 16;
@@ -174,40 +171,40 @@ process_block:
         n = 16;
         goto process_block;
     }
-    *(volatile uint32_t *)&r0 = 0;
-    *(volatile uint32_t *)&r1 = 0; *(volatile uint32_t *)&s1 = 0;
-    *(volatile uint32_t *)&r2 = 0; *(volatile uint32_t *)&s2 = 0;
-    *(volatile uint32_t *)&r3 = 0; *(volatile uint32_t *)&s3 = 0;
-    *(volatile uint32_t *)&r4 = 0; *(volatile uint32_t *)&s4 = 0;
 
+    h1 += (h0 >> 26); h0 &= 0x03FFFFFF;
     h2 += (h1 >> 26); h1 &= 0x03FFFFFF;
     h3 += (h2 >> 26); h2 &= 0x03FFFFFF;
     h4 += (h3 >> 26); h3 &= 0x03FFFFFF;
     h0 += (h4 >> 26) * 5; h4 &= 0x03FFFFFF;
-    h1 += (h0 >> 26); h0 &= 0x03FFFFFF;
 
-    g0 = h0 + 5;
-    g1 = h1 + (g0 >> 26); g0 &= 0x03FFFFFF;
-    g2 = h2 + (g1 >> 26); g1 &= 0x03FFFFFF;
-    g3 = h3 + (g2 >> 26); g2 &= 0x03FFFFFF;
-    g4 = h4 + (g3 >> 26) - (1 << 26); g3 &= 0x03FFFFFF;
+    r0 = h0 + 5;
+    r1 = h1 + (r0 >> 26); r0 &= 0x03FFFFFF;
+    r2 = h2 + (r1 >> 26); r1 &= 0x03FFFFFF;
+    r3 = h3 + (r2 >> 26); r2 &= 0x03FFFFFF;
+    r4 = h4 + (r3 >> 26) - (1 << 26); r3 &= 0x03FFFFFF;
 
-    w = ~(m = (g4 >> 31) - 1);
-    h0 = (h0 & w) | (g0 & m);
-    h1 = (h1 & w) | (g1 & m);
-    h2 = (h2 & w) | (g2 & m);
-    h3 = (h3 & w) | (g3 & m);
-    h4 = (h4 & w) | (g4 & m);
+    w = ~(m = (r4 >> 31) - 1);
+    h0 = (h0 & w) | (r0 & m); *(volatile uint32_t *)&r0 = 0;
+    h1 = (h1 & w) | (r1 & m); *(volatile uint32_t *)&r1 = 0;
+    h2 = (h2 & w) | (r2 & m); *(volatile uint32_t *)&r2 = 0;
+    h3 = (h3 & w) | (r3 & m); *(volatile uint32_t *)&r3 = 0;
+    h4 = (h4 & w) | (r4 & m); *(volatile uint32_t *)&r4 = 0;
 
-    f0 = ((h0 >>  0) | (h1 << 26)) + (uint64_t)LOAD32_LE(key + 16);
-    f1 = ((h1 >>  6) | (h2 << 20)) + (uint64_t)LOAD32_LE(key + 20);
-    f2 = ((h2 >> 12) | (h3 << 14)) + (uint64_t)LOAD32_LE(key + 24);
-    f3 = ((h3 >> 18) | (h4 <<  8)) + (uint64_t)LOAD32_LE(key + 28);
+    d0 = (uint64_t)LOAD32_LE(key + 16) + (h0 >>  0) + (h1 << 26);
+    d1 = (uint64_t)LOAD32_LE(key + 20) + (h1 >>  6) + (h2 << 20) + (d0 >> 32);
+    d2 = (uint64_t)LOAD32_LE(key + 24) + (h2 >> 12) + (h3 << 14) + (d1 >> 32);
+    d3 = (uint64_t)LOAD32_LE(key + 28) + (h3 >> 18) + (h4 <<  8) + (d2 >> 32);
 
-    STORE32_LE(tag +  0, f0); f1 += (f0 >> 32);
-    STORE32_LE(tag +  4, f1); f2 += (f1 >> 32);
-    STORE32_LE(tag +  8, f2); f3 += (f2 >> 32);
-    STORE32_LE(tag + 12, f3);
+    STORE32_LE(tag +  0, d0); *(volatile uint32_t *)&s1 = 0;
+    STORE32_LE(tag +  4, d1); *(volatile uint32_t *)&s2 = 0;
+    STORE32_LE(tag +  8, d2); *(volatile uint32_t *)&s3 = 0;
+    STORE32_LE(tag + 12, d3); *(volatile uint32_t *)&s4 = 0;
+    *(volatile uint64_t *)&d0 = 0; *(volatile uint32_t *)&h0 = 0;
+    *(volatile uint64_t *)&d1 = 0; *(volatile uint32_t *)&h1 = 0;
+    *(volatile uint64_t *)&d2 = 0; *(volatile uint32_t *)&h2 = 0;
+    *(volatile uint64_t *)&d3 = 0; *(volatile uint32_t *)&h3 = 0;
+    *(volatile uint64_t *)&d4 = 0; *(volatile uint32_t *)&h4 = 0;
 }
 
 int poly1305_tagcmp(const unsigned char tag1[16], const unsigned char tag2[16])
