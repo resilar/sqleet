@@ -21,7 +21,7 @@ RELEASE_DIR="$RELEASE"
 echo "[+] SQLite version $VERSION" >&2
 
 echo "[+] Checking rekeyvacuum.c" >&2
-./script/rekeyvacuum.sh sqlite3.c | cmp -s - rekeyvacuum.c || die "rekeyvacuum.c outdated"
+./script/rekeyvacuum.sh sqlite3.c | cmp -s - rekeyvacuum.c || die "outdated rekeyvacuum.c"
 
 echo "[+] Creating release directory $RELEASE_DIR" >&2
 mkdir -p "$RELEASE_DIR"
@@ -35,11 +35,14 @@ echo "[+] Generating sqleet.h amalgamation" >&2
 
 echo '[+] Updating shell.c #include "sqlite3.h" -> "sqleet.h"' >&2
 sed 's/^#include "sqlite3.h"$/#include "sqleet.h"/' shell.c >"$RELEASE_DIR/shell.c"
-grep -Fq '#include "sqleet.h"' "$RELEASE_DIR/shell.c" || die "failed to update shell.c include"
+grep -Fq '#include "sqleet.h"' "$RELEASE_DIR/shell.c" || die "error updating shell.c include"
+
+echo "[+] Copying sqlite3ext.h to release directory" >&2
+cp sqlite3ext.h "$RELEASE_DIR/sqlite3ext.h" || die "error copying sqlite3ext.h"
 
 echo "[+] Creating release archives" >&2
-zip -qr "$RELEASE-amalgamation.zip" "$RELEASE_DIR" || die "failed to create $RELEASE-amalgamation.zip"
-tar -czf "$RELEASE-amalgamation.tar.gz" --owner=0 --group=0 "$RELEASE_DIR" || die "failed to create $RELEASE-amalgamation.tar.gz"
+zip -qr "$RELEASE-amalgamation.zip" "$RELEASE_DIR" || die "error creating $RELEASE-amalgamation.zip"
+tar -czf "$RELEASE-amalgamation.tar.gz" --owner=0 --group=0 "$RELEASE_DIR" || die "error creating $RELEASE-amalgamation.tar.gz"
 
 sync
 echo "[+] Success!" >&2
