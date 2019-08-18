@@ -9,7 +9,7 @@
  */
 typedef struct codec {
     struct codec *reader, *writer;
-    unsigned char key[32], salt[16], header[16];
+    uint8_t key[32], salt[16], header[16];
     enum {
         SQLEET_HAS_KEY      = 0x01,
         SQLEET_HAS_SALT     = 0x02,
@@ -33,7 +33,7 @@ typedef struct codec {
     Btree *btree;
 } Codec;
 
-Codec *codec_new(const char *zKey, int nKey, Codec *from)
+Codec *codec_new(const void *zKey, int nKey, Codec *from)
 {
     Codec *codec;
     if ((codec = sqlite3_malloc(sizeof(Codec)))) {
@@ -62,7 +62,7 @@ void codec_free(void *pcodec)
 {
     if (pcodec) {
         int i;
-        volatile char *p;
+        volatile uint8_t *p;
         Codec *codec = pcodec;
         if ((p = codec->pagebuf)) {
             for (i = 0; i < codec->pagesize; p[i++] = '\0');
@@ -75,7 +75,7 @@ void codec_free(void *pcodec)
 
 static int codec_uri_parameter(const char *zUri, const char *parameter,
                                size_t len_min, size_t len_max,
-                               unsigned char *out)
+                               uint8_t *out)
 {
     int rc;
     char *p, buffer[256];
@@ -301,7 +301,7 @@ void codec_kdf(Codec *codec)
 void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
 {
     uint32_t counter;
-    unsigned char otk[64], tag[16], *data = pdata;
+    uint8_t otk[64], tag[16], *data = pdata;
     Codec *reader = ((Codec *)codec)->reader;
     Codec *writer = ((Codec *)codec)->writer;
 
@@ -378,8 +378,8 @@ static int verify_page1(Pager *pager)
             /* Validate the read database header */
             rc = SQLITE_NOTADB;
             if (!memcmp(page->pData, "SQLite format 3", 16)) {
-                unsigned char *data = page->pData;
-                int pagesize = (data[16] << 8) | data[17];
+                const uint8_t *data = page->pData;
+                const uint16_t pagesize = (data[16] << 8) | data[17];
                 if (pagesize >= 512 && !(pagesize & (pagesize-1))) {
                     if (data[21] == 64 && data[22] == 32 && data[23] == 32) {
                         uint32_t version = data[96];

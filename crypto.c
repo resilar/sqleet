@@ -41,7 +41,7 @@
 /*
  * ChaCha20 stream cipher
  */
-static void chacha20_block(unsigned char out[64], const uint32_t in[16])
+static void chacha20_block(uint8_t out[64], const uint32_t in[16])
 {
     int i;
     uint32_t x[16];
@@ -71,18 +71,17 @@ static void chacha20_block(unsigned char out[64], const uint32_t in[16])
     }
 }
 
-void chacha20_xor(unsigned char *data, size_t n, const unsigned char key[32],
-                  const unsigned char nonce[12], uint32_t counter)
+void chacha20_xor(void *buffer, size_t n, const uint8_t key[32],
+                  const uint8_t nonce[12], uint32_t counter)
 {
     int i;
     uint32_t state[16];
-    unsigned char block[64];
-    static const unsigned char sigma[16] = "expand 32-byte k";
+    uint8_t block[64], *buf = buffer;
 
-    state[ 0] = LOAD32_LE(sigma +  0);
-    state[ 1] = LOAD32_LE(sigma +  4);
-    state[ 2] = LOAD32_LE(sigma +  8);
-    state[ 3] = LOAD32_LE(sigma + 12);
+    state[ 0] = 0x61707865; /* 'expa' */
+    state[ 1] = 0x3320646e; /* 'nd 3' */
+    state[ 2] = 0x79622d32; /* '2-by' */
+    state[ 3] = 0x6b206574; /* 'te k' */
 
     state[ 4] = LOAD32_LE(key +  0);
     state[ 5] = LOAD32_LE(key +  4);
@@ -94,7 +93,6 @@ void chacha20_xor(unsigned char *data, size_t n, const unsigned char key[32],
     state[11] = LOAD32_LE(key + 28);
 
     state[12] = counter;
-
     state[13] = LOAD32_LE(nonce + 0);
     state[14] = LOAD32_LE(nonce + 4);
     state[15] = LOAD32_LE(nonce + 8);
@@ -102,34 +100,32 @@ void chacha20_xor(unsigned char *data, size_t n, const unsigned char key[32],
     while (n >= 64) {
         chacha20_block(block, state);
         for (i = 0; i < 64; i++)
-            data[i] ^= block[i];
+            buf[i] ^= block[i];
         state[12]++;
-        data += 64;
+        buf += 64;
         n -= 64;
     }
 
     if (n > 0) {
         chacha20_block(block, state);
         for (i = 0; i < n; i++)
-            data[i] ^= block[i];
+            buf[i] ^= block[i];
     }
-    return;
 }
 
 /*
  * Poly1305 authentication tags
  */
-void poly1305(const unsigned char *msg, size_t n, const unsigned char key[32],
-              unsigned char tag[16])
+void poly1305(const uint8_t *msg, size_t n, const uint8_t key[32],
+              uint8_t tag[16])
 {
     uint32_t hibit;
     uint64_t d0, d1, d2, d3, d4;
     uint32_t h0, h1, h2, h3, h4;
     uint32_t r0, r1, r2, r3, r4;
     uint32_t s1, s2, s3, s4;
-    unsigned char buf[16];
 
-    hibit = 1 << 24;
+    hibit = (uint32_t)1 << 24;
     h0 = h1 = h2 = h3 = h4 = 0;
     r0 = (LOAD32_LE(key +  0) >> 0) & 0x03FFFFFF;
     r1 = (LOAD32_LE(key +  3) >> 2) & 0x03FFFF03; s1 = r1 * 5;
@@ -163,10 +159,9 @@ process_block:
     }
     if (n) {
         int i;
-        for (i = 0; i < n; i++) buf[i] = msg[i];
-        buf[i++] = 1;
-        while (i < 16) buf[i++] = 0;
-        msg = buf;
+        for (i = 0; i < n; tag[i] = msg[i], i++);
+        for (tag[i++] = 1; i < 16; tag[i++] = 0);
+        msg = tag;
         hibit = 0;
         n = 16;
         goto process_block;
@@ -195,9 +190,9 @@ process_block:
     *(volatile uint64_t *)&d4 = 0; *(volatile uint32_t *)&h4 = 0;
 }
 
-int poly1305_tagcmp(const unsigned char tag1[16], const unsigned char tag2[16])
+int poly1305_tagcmp(const uint8_t tag1[16], const uint8_t tag2[16])
 {
-    unsigned int d = 0;
+    uint8_t d = 0;
     d |= tag1[ 0] ^ tag2[ 0];
     d |= tag1[ 1] ^ tag2[ 1];
     d |= tag1[ 2] ^ tag2[ 2];
@@ -214,7 +209,7 @@ int poly1305_tagcmp(const unsigned char tag1[16], const unsigned char tag2[16])
     d |= tag1[13] ^ tag2[13];
     d |= tag1[14] ^ tag2[14];
     d |= tag1[15] ^ tag2[15];
-    return d;
+    return (int)d;
 }
 
 /*
@@ -222,7 +217,7 @@ int poly1305_tagcmp(const unsigned char tag1[16], const unsigned char tag2[16])
  */
 struct sha256 {
     uint32_t state[8];
-    unsigned char buffer[64];
+    uint8_t buffer[64];
     uint64_t n64;
     int n;
 };
@@ -241,7 +236,7 @@ void sha256_init(struct sha256 *ctx)
     ctx->n = 0;
 }
 
-static void sha256_block(uint32_t state[8], const unsigned char p[64])
+static void sha256_block(uint32_t state[8], const uint8_t p[64])
 {
     uint32_t w[64], a, b, c, d, e, f, g, h;
     uint32_t s0, s1, S0, S1, t1, t2;
@@ -305,39 +300,40 @@ static void sha256_block(uint32_t state[8], const unsigned char p[64])
     state[4] += e; state[5] += f; state[6] += g; state[7] += h;
 }
 
-void sha256_update(struct sha256 *ctx, const unsigned char *data, size_t n)
+void sha256_update(struct sha256 *ctx, const void *data, size_t n)
 {
+    const uint8_t *input = data;
     if (n < 64 || ctx->n) {
         int i, j = (ctx->n + n < 64) ? n : 64 - ctx->n;
         for (i = 0; i < j; i++)
-            ctx->buffer[ctx->n + i] = data[i];
+            ctx->buffer[ctx->n + i] = input[i];
         if ((ctx->n += j) < 64)
             return;
         sha256_block(ctx->state, ctx->buffer);
         ctx->n64 += 64;
         ctx->n = 0;
-        data += j;
+        input += j;
         n -= j;
     }
 
     while (n >= 64) {
-        sha256_block(ctx->state, data);
+        sha256_block(ctx->state, input);
         ctx->n64 += 64;
-        data += 64;
+        input += 64;
         n -= 64;
     }
 
     if (n) {
         int i = 0;
         while (i < n) {
-            ctx->buffer[i] = data[i];
+            ctx->buffer[i] = input[i];
             i++;
         }
         ctx->n = n;
     }
 }
 
-static void sha256_serialize(const uint32_t state[8], unsigned char hash[32])
+static void sha256_serialize(const uint32_t state[8], uint8_t hash[32])
 {
     STORE32_BE(hash +  0, state[0]);
     STORE32_BE(hash +  4, state[1]);
@@ -349,15 +345,14 @@ static void sha256_serialize(const uint32_t state[8], unsigned char hash[32])
     STORE32_BE(hash + 28, state[7]);
 }
 
-void sha256_final(struct sha256 *ctx, unsigned char hash[32])
+void sha256_final(struct sha256 *ctx, uint8_t hash[32])
 {
     int i;
-    unsigned char buf[128];
-    uint64_t nbits = (ctx->n64 + ctx->n) * 8;
-    buf[0] = 0x80;
-    for (i = 1; (ctx->n + i + 8) % 64; buf[i++] = 0);
-    STORE64_BE(buf+i, nbits);
-    sha256_update(ctx, buf, i+8);
+    uint8_t buf[128];
+    const uint64_t nbits = (ctx->n64 + ctx->n) * 8;
+    for (i = 1, buf[0] = 0x80; (ctx->n + i + 8) % 64; buf[i++] = 0);
+    STORE64_BE(buf + i, nbits);
+    sha256_update(ctx, buf, i + 8);
     sha256_serialize(ctx->state, hash);
 }
 
@@ -366,22 +361,22 @@ void sha256_final(struct sha256 *ctx, unsigned char hash[32])
  * states computed in the HMAC-SHA256 calculation of the inner and outer pad.
  */
 void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
-                        int iter, unsigned char *dk, int dklen)
+                        size_t iter, uint8_t *dk, size_t dklen)
 {
-    unsigned char keyblock[64], iblock[64], oblock[64];
-    struct sha256 ctx, ictx, octx;
+    size_t i, j;
     uint32_t I[8], O[8];
-    int i, j, k, len;
+    struct sha256 ctx, ictx, octx;
+    uint8_t keyblock[64], iblock[64], oblock[64];
 
     /* Initialize keyblock */
     if (m > 64) {
         sha256_init(&ctx);
         sha256_update(&ctx, pass, m);
         sha256_final(&ctx, keyblock);
-        memset(keyblock+32, 0, 32);
+        memset(keyblock + 32, 0, 32);
     } else {
         memcpy(keyblock, pass, m);
-        memset(keyblock+m, 0, 64 - m);
+        memset(keyblock + m, 0, 64 - m);
     }
 
     /* Prepare iblock and oblock */
@@ -390,7 +385,7 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
     for (i = 0; i < 64; i++) {
         iblock[i] = 0x36 ^ keyblock[i];
         oblock[i] = 0x5C ^ keyblock[i];
-        *(volatile unsigned char *)(keyblock + i) = 0;
+        *(volatile uint8_t *)(keyblock + i) = 0;
     }
     sha256_update(&ictx, iblock, 64);
     sha256_update(&octx, oblock, 64);
@@ -402,7 +397,9 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
 
     /* PBKDF2 main loop */
     for (i = 1; dklen; i++) {
-        unsigned char ibuf[4];
+        int k;
+        uint8_t ibuf[4];
+        const int len = (dklen < 32) ? (int)dklen : 32;
         STORE32_BE(ibuf, i);
         memcpy(&ctx, &ictx, sizeof(struct sha256));
         sha256_update(&ctx, salt, n);
@@ -413,7 +410,6 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
         sha256_block(O, oblock);
         sha256_serialize(O, iblock);
 
-        len = (dklen < 32) ? dklen : 32;
         memcpy(dk, iblock, len);
         for (j = 1; j < iter; j++) {
             memcpy(I, ictx.state, 32);
@@ -422,9 +418,8 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
             sha256_serialize(I, oblock);
             sha256_block(O, oblock);
             sha256_serialize(O, iblock);
-            for (k = 0; k < len; k++) {
+            for (k = 0; k < len; k++)
                 dk[k] ^= iblock[k];
-            }
         }
         dklen -= len;
         dk += len;
@@ -432,8 +427,8 @@ void pbkdf2_hmac_sha256(const void *pass, size_t m, const void *salt, size_t n,
 
     /* Burn key material */    /* TODO: is this really necessary? */
     for (i = 0; i < 64; i++) { /* for truly paranoid people, yes */
-        *(volatile unsigned char *)(iblock + i) = 0;
-        *(volatile unsigned char *)(oblock + i) = 0;
+        *(volatile uint8_t *)(iblock + i) = 0;
+        *(volatile uint8_t *)(oblock + i) = 0;
     }
 }
 
@@ -495,7 +490,7 @@ static size_t read_urandom(void *buf, size_t n)
 
     /* Read bytes */
     for (i = 0; i < n; i += ret) {
-        while ((ret = read(fd, (char *)buf + i, n - i)) == -1) {
+        while ((ret = read(fd, (uint8_t *)buf + i, n - i)) == -1) {
             if (errno != EAGAIN && errno != EINTR) {
                 close(fd);
                 goto fail;
@@ -506,7 +501,7 @@ static size_t read_urandom(void *buf, size_t n)
 
     /* Verify that the random device returned non-zero data */
     for (i = 0; i < n; i++) {
-        if (((unsigned char *)buf)[i] != 0) {
+        if (((uint8_t *)buf)[i] != 0) {
             errno = errnold;
             return n;
         }
@@ -540,9 +535,9 @@ static size_t entropy(void *buf, size_t n)
  */
 void chacha20_rng(void *out, size_t n)
 {
-    static size_t available = 0;
+    static uint8_t key[32], nonce[12], buffer[64] = {0};
     static uint32_t counter = 0;
-    static unsigned char key[32], nonce[12], buffer[64] = {0};
+    static size_t available = 0;
 
 #if SQLITE_THREADSAFE
     sqlite3_mutex *mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_PRNG);
@@ -563,7 +558,7 @@ void chacha20_rng(void *out, size_t n)
         }
         m = (available < n) ? available : n;
         memcpy(out, buffer + (sizeof(buffer) - available), m);
-        out = (unsigned char *)out + m;
+        out = (uint8_t *)out + m;
         available -= m;
         n -= m;
     }
