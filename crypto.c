@@ -41,12 +41,9 @@
 /*
  * ChaCha20 stream cipher
  */
-static void chacha20_block(uint8_t out[64], const uint32_t in[16])
+static void chacha20_block(uint32_t x[16])
 {
     int i;
-    uint32_t x[16];
-    memcpy(x, in, sizeof(uint32_t) * 16);
-
     #define QR(x, a, b, c, d)                           \
     x[a] += x[b]; x[d] ^= x[a]; x[d] = ROL32(x[d], 16); \
     x[c] += x[d]; x[b] ^= x[c]; x[b] = ROL32(x[b], 12); \
@@ -65,18 +62,18 @@ static void chacha20_block(uint8_t out[64], const uint32_t in[16])
         QR(x, 3, 4, 9, 14)
     }
     #undef QR
-    for (i = 0; i < 16; i++) {
-        const uint32_t v = x[i] + in[i];
-        STORE32_LE(&out[4*i], v);
-    }
 }
 
 void chacha20_xor(void *buffer, size_t n, const uint8_t key[32],
                   const uint8_t nonce[12], uint32_t counter)
 {
     int i;
+    union {
+        uint8_t bytes[64];
+        uint32_t words[16];
+    } block;
     uint32_t state[16];
-    uint8_t block[64], *buf = buffer;
+    uint8_t *buf = buffer;
 
     state[ 0] = 0x61707865; /* 'expa' */
     state[ 1] = 0x3320646e; /* 'nd 3' */
@@ -97,19 +94,32 @@ void chacha20_xor(void *buffer, size_t n, const uint8_t key[32],
     state[14] = LOAD32_LE(nonce + 4);
     state[15] = LOAD32_LE(nonce + 8);
 
-    while (n >= 64) {
-        chacha20_block(block, state);
-        for (i = 0; i < 64; i++)
-            buf[i] ^= block[i];
+    while (n > 64) {
+        for (i = 0; i < 16; i++)
+            block.words[i] = state[i];
+        chacha20_block(block.words);
+        for (i = 0; i < 16; i++) {
+            block.words[i] += state[i];
+            block.words[i] ^= LOAD32_LE(buf);
+            STORE32_LE(buf, block.words[i]);
+            buf += 4;
+        }
         state[12]++;
-        buf += 64;
         n -= 64;
     }
 
-    if (n > 0) {
-        chacha20_block(block, state);
-        for (i = 0; i < n; i++)
-            buf[i] ^= block[i];
+    for (i = 0; i < 16; i++)
+        block.words[i] = state[i];
+    chacha20_block(state);
+    for (i = 0; i < 16; i++) {
+        state[i] += block.words[i];
+        STORE32_LE(&block.bytes[4*i], state[i]);
+    }
+    for (i = 0; i < n; i++)
+        buf[i] ^= block.bytes[i];
+    for (i = 0; i < 16; i++) {
+        *(volatile uint32_t *)&block.words[i] = 0;
+        *(volatile uint32_t *)&state[i] = 0;
     }
 }
 
