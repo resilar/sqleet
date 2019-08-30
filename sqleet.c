@@ -1,3 +1,7 @@
+#if (defined(__linux__) || defined(__unix__)) && !defined(_GNU_SOURCE)
+# define _GNU_SOURCE
+#endif
+
 #define SQLITE3_H_OMIT
 #include "sqleet.h"
 #include "sqlite3.c"
