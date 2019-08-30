@@ -1,4 +1,5 @@
 /* This file is included by sqleet.c */
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
