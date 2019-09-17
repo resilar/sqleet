@@ -53,7 +53,10 @@ Codec *codec_new(const void *zKey, int nKey, Codec *from)
             codec->kdf = from->kdf;
         } else {
             codec->reader = codec->writer = codec;
+            memset(codec->key, 0, sizeof(codec->key));
+            memset(codec->salt, 0, sizeof(codec->salt));
             codec->flags = 0;
+            codec->pagesize = 0;
         }
         codec->pagebuf = NULL;
         codec->zKey = zKey;
