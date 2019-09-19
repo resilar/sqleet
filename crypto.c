@@ -126,13 +126,11 @@ void chacha20_xor(void *buffer, size_t n, const uint8_t key[32],
 void poly1305(const uint8_t *msg, size_t n, const uint8_t key[32],
               uint8_t tag[16])
 {
-    uint32_t hibit;
     uint64_t d0, d1, d2, d3, d4;
     uint32_t h0, h1, h2, h3, h4;
     uint32_t r0, r1, r2, r3, r4;
     uint32_t s1, s2, s3, s4;
 
-    hibit = (uint32_t)1 << 24;
     h0 = h1 = h2 = h3 = h4 = 0;
     r0 = (LOAD32_LE(key +  0) >> 0) & 0x03FFFFFF;
     r1 = (LOAD32_LE(key +  3) >> 2) & 0x03FFFF03; s1 = r1 * 5;
@@ -140,12 +138,14 @@ void poly1305(const uint8_t *msg, size_t n, const uint8_t key[32],
     r3 = (LOAD32_LE(key +  9) >> 6) & 0x03F03FFF; s3 = r3 * 5;
     r4 = (LOAD32_LE(key + 12) >> 8) & 0x000FFFFF; s4 = r4 * 5;
     while (n >= 16) {
+        h4 += 0x01000000;
+
 process_block:
         h0 += (LOAD32_LE(msg +  0) >> 0) & 0x03FFFFFF;
         h1 += (LOAD32_LE(msg +  3) >> 2) & 0x03FFFFFF;
         h2 += (LOAD32_LE(msg +  6) >> 4) & 0x03FFFFFF;
         h3 += (LOAD32_LE(msg +  9) >> 6) & 0x03FFFFFF;
-        h4 += (LOAD32_LE(msg + 12) >> 8) | hibit;
+        h4 += (LOAD32_LE(msg + 12) >> 8);
 
         #define MUL(a,b) ((uint64_t)(a) * (b))
         d0 = MUL(h0,r0) + MUL(h1,s4) + MUL(h2,s3) + MUL(h3,s2) + MUL(h4,s1);
@@ -169,7 +169,6 @@ process_block:
         for (i = 0; i < n; tag[i] = msg[i], i++);
         for (tag[i++] = 1; i < 16; tag[i++] = 0);
         msg = tag;
-        hibit = 0;
         n = 16;
         goto process_block;
     }
