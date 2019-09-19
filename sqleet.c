@@ -324,15 +324,13 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
             counter = LOAD32_LE(data + n + PAGE_NONCE_LEN-4) ^ page;
             chacha20_xor(otk, 64, reader->key, data + n, counter);
 
-            /* Verify the MAC */
+            /* Decrypt and authenticate */
             poly1305(data, n + PAGE_NONCE_LEN, otk, tag);
+            chacha20_xor(data + skip, n - skip, otk+32, data + n, counter+1);
             if (poly1305_tagcmp(data + n + PAGE_NONCE_LEN, tag) != 0) {
                 reader->error = SQLITE_AUTH;
                 return NULL;
             }
-
-            /* Decrypt */
-            chacha20_xor(data + skip, n - skip, otk+32, data + n, counter+1);
             if (page == 1) memcpy(data, "SQLite format 3", 16);
         }
         break;

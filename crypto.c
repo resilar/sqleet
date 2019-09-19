@@ -118,10 +118,6 @@ void chacha20_xor(void *buffer, size_t n, const uint8_t key[32],
     }
     for (i = 0; i < n; i++)
         buf[i] ^= block.bytes[i];
-    for (i = 0; i < 16; i++) {
-        *(volatile uint32_t *)&block.words[i] = 0;
-        *(volatile uint32_t *)&state[i] = 0;
-    }
 }
 
 /*
