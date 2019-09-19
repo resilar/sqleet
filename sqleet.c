@@ -22,10 +22,6 @@ typedef struct codec {
         SQLEET_HAS_SKIP     = 0x10,
         SQLEET_HAS_KDF      = 0x20
     } flags;
-    int error;
-
-    const void *zKey;
-    int nKey;
     void *pagebuf;
     int pagesize;
     int skip;
@@ -33,8 +29,10 @@ typedef struct codec {
         SQLEET_KDF_NONE = 0,
         SQLEET_KDF_PBKDF2_HMAC_SHA256
     } kdf;
-
     Btree *btree;
+    int error;
+    const void *zKey;
+    int nKey;
 } Codec;
 
 Codec *codec_new(const void *zKey, int nKey, Codec *from)
@@ -42,23 +40,17 @@ Codec *codec_new(const void *zKey, int nKey, Codec *from)
     Codec *codec;
     if ((codec = sqlite3_malloc(sizeof(Codec)))) {
         if (from) {
-            memcpy(codec->key, from->key, sizeof(codec->key));
-            memcpy(codec->salt, from->salt, sizeof(codec->salt));
-            memcpy(codec->header, from->header, sizeof(codec->header));
-            codec->reader = (from->reader == from) ? codec : from->reader;
-            codec->writer = (from->writer == from) ? codec : from->writer;
-            codec->flags = from->flags;
-            codec->pagesize = from->pagesize;
-            codec->skip = from->skip;
-            codec->kdf = from->kdf;
+            memcpy(codec, from, sizeof(Codec));
+            if (codec->reader == from)
+                codec->reader = codec;
+            if (codec->writer == from)
+                codec->writer = codec;
+            codec->pagebuf = NULL;
+            codec->btree = NULL;
         } else {
+            memset(codec, 0, sizeof(Codec));
             codec->reader = codec->writer = codec;
-            memset(codec->key, 0, sizeof(codec->key));
-            memset(codec->salt, 0, sizeof(codec->salt));
-            codec->flags = 0;
-            codec->pagesize = 0;
         }
-        codec->pagebuf = NULL;
         codec->zKey = zKey;
         codec->nKey = nKey;
     }
@@ -420,7 +412,7 @@ static int verify_page1(Pager *pager)
 
 /*
  * A hack to control the page size of attached vacuum database.
- * Otherwise the resulting database inherits page size from the source database.
+ * Otherwise the database inherits page size from the source database.
  */
 static void size_hook(void *pcodec, int new_pagesize, int reserved)
 {
