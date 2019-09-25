@@ -240,12 +240,15 @@ int codec_parse_uri_config(Codec *codec, const char *zUri)
     return rc;
 }
 
+#ifndef PBKDF2_HMAC_SHA256_ITERATIONS
+#define PBKDF2_HMAC_SHA256_ITERATIONS 12345
+#endif
 void codec_kdf(Codec *codec)
 {
     if (codec->kdf == SQLEET_KDF_PBKDF2_HMAC_SHA256) {
         pbkdf2_hmac_sha256(codec->zKey, codec->nKey,
                            codec->salt, sizeof(codec->salt),
-                           12345,
+                           PBKDF2_HMAC_SHA256_ITERATIONS,
                            codec->key, sizeof(codec->key));
     } else /*if (codec->kdf == SQLEET_KDF_NONE)*/ {
         memcpy(codec->key, codec->zKey, sizeof(codec->key));
