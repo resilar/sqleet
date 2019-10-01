@@ -559,9 +559,6 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
     Codec *reader, *codec;
     Pgno pgno;
 
-    if (!db || (!nKey && !zKey))
-        return SQLITE_ERROR;
-
     sqlite3_mutex_enter(db->mutex);
     if (!(pBt = db->aDb[(nDb = db_index_of(db, zDbName))].pBt)) {
         rc = SQLITE_INTERNAL;
