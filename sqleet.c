@@ -364,53 +364,6 @@ void *codec_handle(void *codec, void *pdata, Pgno page, int mode)
     return data;
 }
 
-/* Verify encryption key by reading page1 (and triggering KDF) */
-static int verify_page1(Pager *pager)
-{
-    int rc, count;
-    sqlite3PagerSharedLock(pager);
-    sqlite3PagerPagecount(pager, &count);
-    if (count > 0) {
-        /* Non-empty database, read page1 */
-        DbPage *page;
-        sqlite3PcacheTruncate(pager->pPCache, 0);
-        if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK) {
-            /* Validate the read database header */
-            rc = SQLITE_NOTADB;
-            if (!memcmp(page->pData, "SQLite format 3", 16)) {
-                const uint8_t *data = page->pData;
-                const uint16_t pagesize = (data[16] << 8) | data[17];
-                if (pagesize >= 512 && !(pagesize & (pagesize-1))) {
-                    if (data[21] == 64 && data[22] == 32 && data[23] == 32) {
-                        uint32_t version = data[96];
-                        version = (version << 8) | data[97];
-                        version = (version << 8) | data[98];
-                        version = (version << 8) | data[99];
-                        if (3000000 <= version && version < 4000000)
-                            rc = SQLITE_OK;
-                    }
-                }
-            }
-            sqlite3PagerUnref(page);
-        } else {
-            Codec *codec = sqlite3PagerGetCodec(pager);
-            if (codec && codec->error != SQLITE_OK)
-                rc = codec->error;
-            sqlite3PagerSetCodec(pager, NULL, NULL, NULL, NULL);
-        }
-    } else {
-        /* Empty database */
-        Codec *codec = sqlite3PagerGetCodec(pager);
-        if (codec && !(codec->flags & SQLEET_HAS_KEY)) {
-            /* Derive a new key */
-            codec_kdf(codec);
-        }
-        rc = SQLITE_OK;
-    }
-    pager_unlock(pager);
-    return rc;
-}
-
 /*
  * A hack to control the page size of attached vacuum database.
  * Otherwise the database inherits page size from the source database.
@@ -440,30 +393,85 @@ static void size_hook(void *pcodec, int new_pagesize, int reserved)
  */
 static int codec_set_to(Codec *codec, Btree *pBt)
 {
-    Pager *pager = sqlite3BtreePager(pBt);
+    Pager *pager;
+    int rc, count;
+    sqlite3BtreeEnter(pBt);
+    pager = sqlite3BtreePager(pBt);
+
+    /* Prepare codec */
     if (codec) {
-        /* Adjust the page size and reserved area */
-        const int reserved = codec->writer ? PAGE_RESERVED_LEN : 0;
         if (!codec->pagesize)
             codec->pagesize = sqlite3BtreeGetPageSize(pBt);
         if (!(codec->pagebuf = sqlite3_malloc(codec->pagesize))) {
-            codec_free(codec);
-            return SQLITE_NOMEM;
+            rc = SQLITE_NOMEM;
+            goto kill_codec;
         }
-        sqlite3BtreeSetPageSize(pBt, codec->pagesize, reserved, 0);
-
-        /* Force secure delete */
-        sqlite3BtreeSecureDelete(pBt, 1);
-
-        /* Set pager codec and try to read page1 */
         codec->btree = pBt;
         codec->error = SQLITE_OK;
+    }
+
+    /* Acquire shared pager lock (may block due to concurrent writes) */
+    while ((rc = sqlite3PagerSharedLock(pager)) != SQLITE_OK) {
+        if (rc != SQLITE_BUSY || !btreeInvokeBusyHandler(pBt->pBt))
+            goto kill_codec;
+    }
+
+    /* Set (or unset) pager codec */
+    if (codec) {
+        const int reserved = codec->writer ? PAGE_RESERVED_LEN : 0;
+        sqlite3BtreeSetPageSize(pBt, codec->pagesize, reserved, 0);
+        sqlite3BtreeSecureDelete(pBt, 1);
         sqlite3PagerSetCodec(pager, codec_handle, size_hook, codec_free, codec);
     } else {
-        /* Unset a codec */
         sqlite3PagerSetCodec(pager, NULL, NULL, NULL, NULL);
     }
-    return verify_page1(pager);
+
+    /* Verify codec */
+    sqlite3PagerPagecount(pager, &count);
+    if (count > 0) {
+        /* Non-empty database, read page 1 with the codec */
+        DbPage *page;
+        sqlite3PcacheClear(pager->pPCache);
+        if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK) {
+            rc = SQLITE_NOTADB;
+            if (!memcmp(page->pData, "SQLite format 3", 16)) {
+                const uint8_t *data = page->pData;
+                const uint16_t pagesize = (data[16] << 8) | data[17];
+                if (pagesize >= 512 && !(pagesize & (pagesize-1))) {
+                    if (data[21] == 64 && data[22] == 32 && data[23] == 32) {
+                        uint32_t version = data[96];
+                        version = (version << 8) | data[97];
+                        version = (version << 8) | data[98];
+                        version = (version << 8) | data[99];
+                        if (3000000 <= version && version < 4000000)
+                            rc = SQLITE_OK;
+                    }
+                }
+            }
+            sqlite3PagerUnrefPageOne(page);
+        } else if (codec)  {
+            /* Invalid codec */
+            if (codec->error != SQLITE_OK)
+                rc = codec->error;
+            sqlite3PagerSetCodec(pager, NULL, NULL, NULL, NULL);
+        }
+    } else {
+        /* Empty database, assume the codec is valid */
+        if (codec && !(codec->flags & SQLEET_HAS_KEY)) {
+            /* Derive a new encryption key */
+            codec_kdf(codec);
+        }
+        rc = SQLITE_OK;
+    }
+
+    pager_unlock(pager);
+    sqlite3BtreeLeave(pBt);
+    return rc;
+
+kill_codec:
+    codec_free(codec);
+    sqlite3BtreeLeave(pBt);
+    return rc;
 }
 
 void sqlite3CodecGetKey(sqlite3 *db, int nDb, void **zKey, int *nKey)
@@ -579,7 +587,7 @@ int sqlite3_rekey_v2(sqlite3 *db, const char *zDbName,
                 reader->writer = reader->reader;
             }
         } else {
-            rc = verify_page1(pager);
+            rc = codec_set_to(NULL, pBt);
         }
         goto leave;
     }
