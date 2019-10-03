@@ -412,7 +412,7 @@ static int codec_set_to(Codec *codec, Btree *pBt)
 
     /* Acquire shared pager lock (may block due to concurrent writes) */
     while ((rc = sqlite3PagerSharedLock(pager)) != SQLITE_OK) {
-        if (rc != SQLITE_BUSY || !btreeInvokeBusyHandler(pBt->pBt))
+        if ((rc & 0xFF) != SQLITE_BUSY || !btreeInvokeBusyHandler(pBt->pBt))
             goto kill_codec;
     }
 
