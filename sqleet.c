@@ -432,7 +432,8 @@ static int codec_set_to(Codec *codec, Btree *pBt)
         /* Non-empty database, read page 1 with the codec */
         DbPage *page;
         sqlite3PcacheClear(pager->pPCache);
-        if ((rc = sqlite3PagerGet(pager, 1, &page, 0)) == SQLITE_OK) {
+        rc = sqlite3PagerGet(pager, 1, &page, PAGER_GET_READONLY);
+        if (rc == SQLITE_OK) {
             rc = SQLITE_NOTADB;
             if (!memcmp(page->pData, "SQLite format 3", 16)) {
                 const uint8_t *data = page->pData;
@@ -464,7 +465,7 @@ static int codec_set_to(Codec *codec, Btree *pBt)
         rc = SQLITE_OK;
     }
 
-    pager_unlock(pager);
+    pagerUnlockIfUnused(pager);
     sqlite3BtreeLeave(pBt);
     return rc;
 
