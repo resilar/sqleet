@@ -402,6 +402,8 @@ static int codec_set_to(Codec *codec, Btree *pBt)
 
     /* Prepare codec */
     if (codec) {
+        if (codec->pagebuf)
+            sqlite3_free(codec->pagebuf);
         if (!codec->pagesize)
             codec->pagesize = sqlite3BtreeGetPageSize(pBt);
         if (!(codec->pagebuf = sqlite3_malloc(codec->pagesize))) {
