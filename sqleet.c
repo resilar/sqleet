@@ -146,6 +146,8 @@ int codec_parse_uri_config(Codec *codec, const char *zUri)
 {
     int rc, pagesize;
     const char *value;
+    if (zUri && !*zUri)
+        zUri = NULL;
 
     /* Override page_size PRAGMA */
     pagesize = (int)sqlite3_uri_int64(zUri, "page_size", -1);
