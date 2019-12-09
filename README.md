@@ -53,7 +53,7 @@ Cryptography buzzwords
 - Poly1305 authentication tags.
 
 A low-level description of the database encryption scheme is available in
-[sqleet.c:268](sqleet.c#L268).
+[sqleet.c:265](sqleet.c#L265).
 
 
 Example
