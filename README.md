@@ -1,10 +1,15 @@
-**sqleet** is a public domain encryption extension for
-[SQLite3](https://www.sqlite.org/).
+**sqleet** is an encryption extension for [SQLite3](https://www.sqlite.org/).
+The encryption is transparent (*on-the-fly*) and based on modern cryptographic
+algorithms designed for high performance in software and robust side-channel
+resistance. The compilation of sqleet is easy because there are no external
+dependencies, which simplifies cross-compiling and cross-platform development.
+
+In the spirit of SQLite3, the sqleet source code is in the public domain.
 
 - [Compiling](#compiling)
-- [Cryptography buzzwords](#cryptography-buzzwords)
 - [Example](#example)
-- [Library API](#library-api)
+- [Cryptography](#cryptography)
+- [sqleet API](#sqleet-api)
   - [C programming interface](#c-programming-interface)
   - [URI configuration interface](#uri-configuration-interface)
 - [Android/iOS support](#androidios-support)
@@ -25,35 +30,32 @@ SQLite3 shell with sqleet encryption support can be compiled as follows:
 % gcc sqleet.c shell.c -o sqleet
 ```
 
-[Example](#example) illustrates the sqleet encryption using the compiled shell.
-[Library API](#library-api) consists of [C programming
-interface](#c-programming-interface) and [URI-based configuration
-interface](#uri-configuration-interface).
+[Example](#example) demonstrates the use of the sqleet encryption extension with
+the compiled shell. For application programmers, [sqleet API](#sqleet-api)
+offers [C programming interface](#c-programming-interface) and language-agnostic
+[URI-based configuration interface](#uri-configuration-interface) for run-time
+management of the encryption settings.
 
 To use sqleet as a library, the recommended way is to download a preconfigured
 [release package](https://github.com/resilar/sqleet/releases/latest) instead of
-cloning the source repository. Contained `sqleet.c` and `sqleet.h` files are
-drop-in replacements for the original `sqlite3.c` amalgamation and `sqlite3.h`
-header. Alternatively, `sqleet.c` and `sqleet.h` of the source repository can
-be used directly if all sqleet source files are available at compile time.
+cloning the git repository. Release package contains `sqleet.c` and `sqleet.h`
+amalgamations that are drop-in replacements for the official `sqlite3.c` and
+`sqlite3.h` amalgamations. Non-amalgamated `sqleet.c` and `sqleet.h` files from
+master branch can be used as drop-in replacements similarly, assuming all
+necessary sqleet source files are available during compilation. However, sqleet
+development mainly happens in the master branch, so release are considered to be
+more stable and a better choice for the average user.
 
-To produce a custom release version of sqleet, run
-`./script/amalgamate.sh <sqleet.c >release.c`
-to create an amalgamation of SQLite3 with sqleet encryption support. Similarly,
-run
-`./script/amalgamate.sh <sqleet.h >release.h`
-to amalgamate the header.
+Building a custom release version of sqleet is a straightforward task.
 
+ * Clone or fork sqleet and patch it as you wish
+ * Create source and header amalgamations for release
+    * `./script/amalgamate.sh <sqleet.c >sqlame.c`
+    * `./script/amalgamate.sh <sqleet.h >sqlame.h`
+ * Package the amalgamations with other release files
 
-Cryptography buzzwords
-----------------------
-
-- PBKDF2-HMAC-SHA256 key derivation with a 16-byte salt and 12345 iterations.
-- ChaCha20 stream cipher with one-time keys.
-- Poly1305 authentication tags.
-
-A low-level description of the database encryption scheme is available in
-[sqleet.c:265](sqleet.c#L265).
+[script/release.sh](script/release.sh) shows the exact release procedure of
+sqleet.
 
 
 Example
@@ -86,7 +88,8 @@ sqlite> .quit
 00001ff0  e5 ad 4a cd 75 af 8e 8a  e2 79 f3 d9 2e 21 e8 4b  |..J.u....y...!.K|
 ```
 
-The resulting encrypted database is accessible only with the correct key.
+Notice that the data of the encrypted database is indistinguishable from random.
+After encryption, the unencrypted data is accessible only with the correct key.
 
 ```
 [sqleet]% ./sqleet hello.db
@@ -106,38 +109,28 @@ INSERT INTO hello VALUES('Hello, world!');
 COMMIT;
 ```
 
-The key can also be provided via [SQLite3 URI
-filenames](https://www.sqlite.org/uri.html) instead of `PRAGMA`.
+Instead of `PRAGMA` commands, the key can also be provided in [SQLite3 URI
+filename](https://www.sqlite.org/uri.html) using `key` parameter.
 
 ```
 [sqleet]% ./sqleet 'file:hello.db?key=swordfish' 'SELECT * FROM hello'
 Hello, world!
 ```
 
-**Note**: \
-The contents of an encrypted database file are indistinguishable from random
-data of the same length. This is a conscious design decision made in sqleet,
-but as a drawback, database settings cannot be read directly from the database
-file. Thus, it is the user's responsibility to guarantee that the settings are
-initialized properly before accessing the database. Most importantly, if the
-database page size differs from the default 4096, then opening the database
-will fail regardless of correct key unless the user explicitly sets `page_size`
-to the proper value using `PRAGMA` command or [URI
-API](#uri-configuration-interface).
 
-In contrast, the official [SQLite Encryption Extension
-(SEE)](https://www.sqlite.org/see) leaves bytes 16..23 of the database header
-unencrypted so that certain information, including the page size, can be read
-from encrypted databases - with the obvious cost of making database files
-distinguishable from random. sqleet can optionally be compiled with
-`-DSKIP_HEADER_BYTES=24` flag to get the same default behavior (bytes 0..15
-contain the KDF salt so only the bytes 16..23 are actually skipped). URI
-parameter `skip=n` overrides the compile-time value of `SKIP_HEADER_BYTES` with
-`n`.
+Cryptography
+------------
+
+- PBKDF2-HMAC-SHA256 key derivation with a 16-byte salt and 12345 iterations.
+- ChaCha20 stream cipher with one-time keys.
+- Poly1305 authentication tags.
+
+A low-level description of the database encryption scheme is available in
+[sqleet.c:265](sqleet.c#L265).
 
 
-Library API
------------
+sqleet API
+----------
 
 The public sqleet API consists of [C programming
 interface](#c-programming-interface) and [URI configuration
@@ -185,6 +178,29 @@ Return value is `SQLITE_OK` on success and an SQLite3 error code on failure.
 In addition, there are `sqlite3_key_v2()` and `sqlite3_rekey_v2()` functions
 that accept name of the target database as the second parameter.
 
+---
+
+**Note**: \
+In sqleet, the contents of an encrypted database file are indistinguishable from
+random data (of the same length). This is a conscious design decision, but as a
+drawback, database settings cannot be read from the database file. Therefore, it
+is the user's responsibility to properly initialize database settings before
+accessing the database. The most common issue is that opening a database fails
+regardless of valid key because the page size of the database differs from the
+default 4096 and `page_size` has not been set to the correct value with `PRAGMA`
+or [URI API](#uri-configuration-interface).
+
+The official [SQLite Encryption Extension (SEE)](https://www.sqlite.org/see)
+leaves bytes 16..23 of the database header unencrypted so that page size and
+other settings can be directly read from encrypted databases, which obviously
+makes SEE-encrypted databases distinguishable from random data. In sqleet, this
+behavior can be optionally enabled with `-DSKIP_HEADER_BYTES=24` compile-time
+flag (bytes 0..15 contain the KDF salt so only the bytes 16..23 are actually
+skipped and left unencrypted). At run-time, the compile-time default can be
+overridden with URI parameter `skip=n` where `n` is the skip amount. 
+
+---
+
 
 ### URI configuration interface
 
@@ -192,8 +208,8 @@ that accept name of the target database as the second parameter.
 versions. Use at your own risk!
 
 Run-time configuration of sqleet encryption is implemented based on [SQLite3
-URI filenames](https://www.sqlite.org/uri.html) which allow defining parameters
-when opening a database. List of URI parameters supported by sqleet:
+URI filenames](https://www.sqlite.org/uri.html) which contain configuration
+parameters for databases. List of URI parameters supported by sqleet:
 
 | Parameter   | Description                                                    |
 | :---------- | :------------------------------------------------------------- |
@@ -204,31 +220,49 @@ when opening a database. List of URI parameters supported by sqleet:
 | `skip`      | Run-time setting overriding compile-time SKIP_HEADER_BYTES     |
 | `page_size` | Equivalent to `page_size` PRAGMA                               |
 
-Hex-prefixed versions accepting a hex input string are available for parameters
-`key`, `salt` and `header`.
+Parameters `key`, `salt` and `header` have additional `hex`-prefixed versions
+that accept hex input strings such as `'73716c656574'`.
 
-Parameters `salt` and `header` expect 16-byte strings as inputs (shorter
-strings are zero-padded to 16 bytes). The `header` string is stored in the
-first 16 bytes of the database file (`header` defaults to `salt` value if
-undefined). If `kdf=none`, then the default PBKDF2-HMAC-SHA256 is disabled and
-`key` accepts accepts a 32-byte string that becomes the *master* encryption key
-which is normally derived from the key by the KDF. This ultimately allows the
-user of the library to take full control of the key derivation process.
+Parameters `salt` and `header` expect 16-byte input strings. Shorter strings are
+zero-padded to 16-bytes, while longer inputs get automatically rejected.
 
-Parameters `skip` and `page_size` override compile-time `SKIP_HEADER_BYTES`
-value and `PRAGMA page_size` value, respectively.
+Parameter `header` represents the first 16 bytes of the database file, that is,
+SQLite3 magic header string for unencrypted databases. For encrypted databases,
+`header` defaults to the value of `salt` unless explicitly set to other value.
+Remember that `salt` is a parameter for the key derivation function (KDF) which
+is stored in the beginning of the database file *by default*, in which case both
+`salt` and `header` contain the same value (KDF salt). Sometimes, however, the
+user may want to keep the salt secret, or control the first 16 bytes of the
+database file for some purpose. In such cases, the user stores the salt and then
+overwrites the beginning of the database file with any 16-byte `header` value.
+(If this explanation was too abstract or nonsensical to fully grasp, see the iOS
+workaround in the end of [Android/iOS support](#androidios-support) for a
+practical real-world use-case of `header` feature).
+
+URI parameter `kdf=none` disables the default PBKDF2-HMAC-SHA256 key derivation.
+If KDF is disabled, `key` and `hexkey` accept a 32-byte *raw key* that becomes
+the *master* encryption key which otherwise would be derived by the KDF from the
+key and salt. Disabling KDF is a powerful feature for *advanced users* who need
+full control of the key derivation process.
+
+Parameters `skip` and `page_size` override the compile-time `SKIP_HEADER_BYTES`
+value and the database `PRAGMA page_size` configuration.
 
 Changing URI settings of an existing database can be accomplished with `VACUUM
 INTO` (introduced in SQLite 3.27.0) by giving new URI parameter values in the
 `INTO` filename. For example, `VACUUM INTO 'file:skipped.db?skip=24'` vacuums
 the current main database to file `skipped.db` with `skip` set to 24. Other URI
 settings, including the encryption key, are inherited from the main database
-(unless `key` parameter is specified, in which case default values are used for
-any unspecified parameters).
+unless `key` parameter is specified, in which case any undefined parameters are
+initialized to default values. Database settings update with `VACUUM INTO` is
+complex operation with many special cases and important details (omitted here).
+So be prepared for some undocumented behavior, but please open an issue if
+encountering obviously broken on wrong behavior.
 
-Erroneus parameters (e.g., unsupported value or otherwise bad input) cause the
-opening (or vacuuming) of the database to fail with a non-zero SQLite3 error
-code.
+Erroneus parameters, such as unsupported parameter value or otherwise bad input,
+returns a non-zero SQLite3 error code when opening (or vacuuming) a database.
+The current version returns `SQLITE_MISUSE` error, in most cases, if URI parsing
+fails or the resulting configuration is invalid.
 
 
 Android/iOS support
@@ -279,11 +313,10 @@ Versioning scheme
 [sqleet releases](https://github.com/resilar/sqleet/releases/) follow a
 perverse form of semantic versioning which requires some explanation. Major
 version number increments indicate compatibility breaks as usual, but the minor
-& patch version numbers match the targeted SQLite3 version. For instance,
+and patch version numbers match the targeted SQLite3 version. For instance,
 sqleet v0.25.1 corresponds to SQLite v3.25.1. Although the target SQLite3
 version is the primarily supported, sqleet is typically forward and backward
-compatible across different SQLite3 versions without any changes to the source
-code.
+compatible across different SQLite3 versions without any changes to the code.
 
 As a corollary, sqleet releases are published whenever a new SQLite3 version is
 released. A new sqleet release thus does not necessarily include bug fixes or
