@@ -1,3 +1,12 @@
+**Warning:** This project is currently unmaintained due to [the deprecation of
+codec API](https://www.sqlite.org/src/timeline?c=5a877221ce90e752) in SQLite3
+upstream. Therefore, sqleet is stuck at SQLite version 3.31.1 until a *major*
+rewrite happens. Meanwhile, I recommend using
+[wxSQLite3](https://github.com/utelle/wxsqlite3) which offers sqleet-compatible
+encryption for the latest version(s) of SQLite3.
+
+---
+
 **sqleet** is an encryption extension for [SQLite3](https://www.sqlite.org/).
 The encryption is transparent (*on-the-fly*) and based on modern cryptographic
 algorithms designed for high performance in software and robust side-channel
